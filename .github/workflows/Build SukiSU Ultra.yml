@@ -108,24 +108,25 @@ jobs:
       - name: 🛠 Cache APT packages (缓存APT包)
         uses: actions/cache@v3
         with:
-          path: /var/lib/apt/lists
+          path: |
+            /var/cache/apt
+            /etc/apt
           key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/Build SukiSU Ultra.yml') }}
           restore-keys: |
             ${{ runner.os }}-apt-
 
       - name: 📦 Install dependencies (安装依赖)
         run: |
-          if [ ! -d "/var/lib/apt/lists" ] || [ -z "$(ls -A /var/lib/apt/lists)" ]; then
-            sudo apt update -qq
-          else
-            echo "使用缓存的APT列表"
+          if [ -f /var/lib/apt/lists/lock ]; then
+            sudo rm -f /var/lib/apt/lists/lock
           fi
-          sudo apt install -y --no-install-recommends \
-            python3 git curl ccache libelf-dev \
-            build-essential flex bison libssl-dev \
-            libncurses-dev liblz4-tool zlib1g-dev \
-            libxml2-utils rsync unzip
-          ccache --version
+          sudo apt update -qq 2>/dev/null
+          sudo DEBIAN_FRONTEND=noninteractive apt install -yq --no-install-recommends \
+              python3 git curl ccache libelf-dev \
+              build-essential flex bison libssl-dev \
+              libncurses-dev liblz4-tool zlib1g-dev \
+              libxml2-utils rsync unzip > /dev/null 2>&1
+          echo "依赖安装完成"
 
       - name: 📥 Restore ccache (恢复 ccache 缓存)
         uses: actions/cache@v3

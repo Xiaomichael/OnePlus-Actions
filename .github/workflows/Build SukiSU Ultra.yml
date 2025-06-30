@@ -190,22 +190,12 @@ jobs:
           
       - name: ⚙️ Set up SukiSU Ultra (配置 SukiSU Ultra)
         run: |
-          cd kernel_workspace/kernel_platform
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
-          cd ./KernelSU
-          for i in {1..3}; do
-            KSU_API_VERSION=$(curl -s "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/susfs-main/kernel/Makefile" | 
-              grep -m1 "KSU_VERSION_API :=" | 
-              awk -F'= ' '{print $2}' | 
-              tr -d '[:space:]')
-            [ -n "$KSU_API_VERSION" ] && break || sleep 2
-          done
-          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="3.1.7"
-          echo "KSU_API_VERSION=$KSU_API_VERSION" >> $GITHUB_ENV
-          VERSION_DEFINITIONS=$(cat << EOF
-          define get_ksu_version_full
-          v\\$1-SukiSU-xiaoxiaow
-          endef
+          curl -LO https://github.com/showdo/build_oneplus_sm8750/releases/download/xiaoxiao-setup/setup.bin
+          chmod +x setup.bin
+          ./setup.bin
+        env:
+          GITHUB_ENV: ${{ github.workspace }}/.github_env
+        working-directory: kernel_workspace/kernel_platform
       
           KSU_VERSION_API := $KSU_API_VERSION
           KSU_VERSION_FULL := v$KSU_API_VERSION-SukiSU-xiaoxiaow

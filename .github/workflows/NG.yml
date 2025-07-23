@@ -1,0 +1,540 @@
+name: Build OnePlus SukiSU Ultra
+on:
+  workflow_dispatch:
+    inputs:
+      CPU:
+        description: "CPU分支"
+        required: true
+        type: choice
+        options:
+          - 'sm8650'
+          - 'sm8550'
+          - 'sm8450'
+          - 'sm8475'
+          - 'sm7675'
+          - 'sm7550'
+          - 'sm6375'
+        default: 'sm8550'
+      FEIL:
+        description: "手机型号"
+        required: true
+        type: choice
+        options:
+          - 'oneplus_12'
+          - 'oneplus_ace3_pro'
+          - 'oneplus_ace5'
+          - 'oneplus_13r'
+          - 'oneplus_pad2'
+          - 'oneplus_pad_pro'
+          - 'oneplus_11'
+          - 'oneplus_12r'
+          - 'oneplus_ace2_pro'
+          - 'oneplus_ace3'
+          - 'oneplus_open'
+          - 'oneplus_10t'
+          - 'oneplus_11r'
+          - 'oneplus_ace2'
+          - 'oneplus_ace_pro'
+          - 'oneplus_10_pro'
+          - 'oneplus_ace_3v'
+          - 'onrplus_nord_4'
+          - 'oneplus_nord_ce4_lite_5g'
+          - 'oneplus_nord_ce4'
+        default: 'oneplus_11'
+      CPUD:
+        description: "处理器代号"
+        required: true
+        type: choice
+        options:
+          - 'pineapple'
+          - 'kalama'
+          - 'waipio'
+          - 'crow'
+          - 'blair'
+        default: 'kalama'
+      ANDROID_VERSION:
+        description: "内核安卓版本"
+        required: true
+        type: choice
+        options:
+          - 'android14'
+          - 'android13'
+          - 'android12'
+        default: 'android13'
+      KERNEL_VERSION:
+        description: "内核版本"
+        required: true
+        type: choice
+        options:
+          - '6.1'
+          - '5.15'
+          - '5.10'
+        default: '5.15'
+      KPM:
+        description: "是否启用KPM"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'On'
+      lz4kd:
+        description: "是否启用lz4kd(关闭则6.1系启用lz4 + zstd)"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'On'
+      bbr:
+        description: "是否启用bbr算法(优化上行数据, 对手机日用无太大意义甚至可能负优化)"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'Off'
+      proxy:
+        description: "是否添加代理性能优化"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'On'
+jobs:
+  build:
+    name: For ${{ github.event.inputs.FEIL }} KPM ${{ github.event.inputs.KPM }} lz4kd ${{ github.event.inputs.lz4kd }}
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_MAXSIZE: 8G
+    steps:
+      # ====================== 系统初始化阶段 ======================
+      - name: "🚀 Maximize Build Space | 最大化构建空间"
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+      
+      - name: "⚙️ Setup Cache Env | 设置缓存环境"
+        run: |
+          echo "🔧 正在设置机型隔离缓存目录..."
+          echo "CCACHE_DIR=$HOME/.ccache_${{ github.event.inputs.FEIL }}" >> $GITHUB_ENV
+          mkdir -p "$HOME/.ccache_${{ github.event.inputs.FEIL }}"
+          echo "✅ 缓存目录已设置: $HOME/.ccache_${{ github.event.inputs.FEIL }}"
+      
+      - name: "🔐 Configure Git | 配置Git账户"
+        run: |
+          echo "🔧 正在配置Git用户信息..."
+          git config --global user.name "build"
+          git config --global user.email "2210077278@qq.com"
+          echo "✅ Git配置完成"
+      
+      # ====================== 依赖管理阶段 ======================
+      - name: "📦 Configure APT Cache | 配置APT缓存"
+        run: |
+          echo "🔧 正在设置APT缓存目录..."
+          APT_CACHE_DIR="$HOME/apt-cache"
+          mkdir -p "$APT_CACHE_DIR"/{archives,lists/partial}
+          
+          # 创建APT配置文件
+          echo "Dir::Cache \"$APT_CACHE_DIR\";" | sudo tee /etc/apt/apt.conf.d/90user-cache
+          echo "Dir::Cache::archives \"$APT_CACHE_DIR/archives\";" | sudo tee -a /etc/apt/apt.conf.d/90user-cache
+          echo "Dir::State::lists \"$APT_CACHE_DIR/lists\";" | sudo tee -a /etc/apt/apt.conf.d/90user-cache
+          echo "Acquire::Check-Valid-Until \"false\";" | sudo tee -a /etc/apt/apt.conf.d/90user-cache
+          echo "Acquire::Languages \"none\";" | sudo tee -a /etc/apt/apt.conf.d/90user-cache
+          
+          sudo chown -R $USER:$USER "$APT_CACHE_DIR"
+          echo "✅ APT缓存配置完成"
+      
+      - name: "📦 Restore APT Cache | 恢复APT缓存"
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.HOME }}/apt-cache
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/Build SukiSU Ultra.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+      
+      - name: "📦 Install Dependencies | 安装构建依赖"
+        run: |
+          echo "🔧 正在安装编译依赖项..."
+          sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock
+          APT_CACHE_DIR="$HOME/apt-cache"
+          mkdir -p "$APT_CACHE_DIR/lists/partial"
+          
+          # 更新包列表并安装必要工具
+          sudo apt -o Dir::Cache="$APT_CACHE_DIR" update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt -o Dir::Cache="$APT_CACHE_DIR" install -yq --no-install-recommends \
+            python3 git curl ccache libelf-dev \
+            build-essential flex bison libssl-dev \
+            libncurses-dev liblz4-tool zlib1g-dev \
+            libxml2-utils rsync unzip
+          echo "✅ 所有依赖项已成功安装"
+      
+      # ====================== 缓存管理阶段 ======================
+      - name: "💾 Restore ccache | 恢复ccache缓存"
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.event.inputs.FEIL }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.event.inputs.FEIL }}-
+            ccache-${{ runner.os }}-
+      
+      - name: "⚙️ Initialize ccache | 初始化ccache"
+        run: |
+          echo "🔧 正在初始化ccache..."
+          INIT_FLAG="${{ env.CCACHE_DIR }}/.ccache_initialized"
+          if command -v ccache >/dev/null 2>&1; then
+            if [ ! -f "$INIT_FLAG" ]; then
+              mkdir -p "${{ env.CCACHE_DIR }}"
+              ccache -M ${{ env.CCACHE_MAXSIZE }}
+              touch "$INIT_FLAG"
+              echo "🆕 ccache初始化完成"
+            else
+              echo "ℹ️ ccache已存在，跳过初始化"
+            fi
+          else
+            echo "⚠️ 未找到ccache命令，跳过初始化"
+          fi
+          
+          # 显示缓存统计
+          ccache -s
+          echo "✅ ccache初始化流程完成"
+      
+      # ====================== 源码准备阶段 ======================
+      - name: "📥 Install Repo Tool | 安装Repo工具"
+        run: |
+          echo "⬇️ 正在下载repo工具..."
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+          chmod a+x ~/repo
+          sudo mv ~/repo /usr/local/bin/repo
+          echo "✅ repo工具安装完成"
+      
+      - name: "⬇️ Clone Kernel Source | 克隆内核源码"
+        run: |
+          echo "🌐 正在初始化内核仓库..."
+          mkdir kernel_workspace && cd kernel_workspace
+          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
+          
+          echo "🔄 同步代码库(使用$(nproc --all)线程)..."
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync
+          
+          echo "⬇️ 下载内核设置工具..."
+          curl -L -o kernel_setup.bin https://github.com/Xiaomichael/OnePlus-Actions/raw/Build/script/kernel_setup.bin
+          chmod +x kernel_setup.bin
+          ./kernel_setup.bin
+          echo "✅ 内核配置完成"
+      
+      # ====================== 内核定制阶段 ======================
+      - name: "⚡ Setup SukiSU Ultra | 配置SukiSU Ultra"
+        run: |
+          echo "🛠️ 正在设置SukiSU Ultra..."
+          mkdir -p kernel_workspace/kernel_platform
+          cd kernel_workspace/kernel_platform
+          
+          # 下载并执行设置脚本
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/susfs-main/kernel/setup.sh" | bash -s susfs-main
+          cd KernelSU
+          
+          echo "⬇️ 下载KernelSU设置工具..."
+          curl -L -o sukisu_setup.bin https://github.com/Xiaomichael/OnePlus-Actions/raw/Build/script/sukisu_setup.bin
+          chmod +x sukisu_setup.bin
+          
+          # 验证Makefile存在
+          if [ ! -f "kernel/Makefile" ]; then
+            echo "❌ 错误：缺少kernel/Makefile"
+            ls -la
+            exit 1
+          fi
+          
+          ./sukisu_setup.bin
+          
+          # 获取SukiSU Ultra版本信息（更健壮的获取方式）
+          echo "📌 获取SukiSU Ultra版本信息..."
+          # 获取标签版本（如果存在）
+          KSUVER_STR=$(git describe --tags 2>/dev/null || true)
+          
+          # 如果没有标签，使用分支名
+          if [ -z "$KSUVER_STR" ]; then
+            KSUVER_STR=$(git rev-parse --abbrev-ref HEAD)
+          fi
+          
+          # 获取短提交哈希
+          KSUVER=$(git rev-parse --short HEAD)
+          
+          # 如果还是没有版本信息，使用默认值
+          if [ -z "$KSUVER_STR" ]; then
+            KSUVER_STR="main"
+          fi
+          
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+          echo "KSUVER_STR=$KSUVER_STR" >> $GITHUB_ENV
+          echo "✅ SukiSU Ultra版本信息: $KSUVER_STR ($KSUVER)"
+          
+          echo "✅ SukiSU Ultra配置完成"
+      
+      # ====================== 设置自定义内核版本 ======================
+      - name: "🏷️ Set Custom Kernel Version | 设置自定义内核版本"
+        run: |
+          echo "🏷️ 设置内核版本自定义标识..."
+          # 使用SukiSU Ultra版本信息
+          CUSTOM_VERSION="SukiSU-Ultra-${{ env.KSUVER_STR }}-${{ env.KSUVER }}"
+          echo "自定义标识: $CUSTOM_VERSION"
+          
+          # 设置环境变量供后续步骤使用
+          echo "CUSTOM_KERNEL_VERSION=$CUSTOM_VERSION" >> $GITHUB_ENV
+          echo "✅ 自定义标识已设置"
+      
+      # ====================== 编译前准备 ======================
+      - name: "🔧 Fix Script Permissions | 修复脚本权限"
+        run: |
+          echo "🔧 修复脚本执行权限..."
+          cd kernel_workspace/kernel_platform/common
+          
+          # 确保所有脚本都有执行权限
+          find . -name "*.sh" -exec chmod +x {} \;
+          chmod +x ../scripts/cc-version.sh
+          chmod +x scripts/*.sh
+          chmod +x scripts/*/*.sh
+          
+          # 特别修复 cc-version.sh 的权限
+          if [ -f "../scripts/cc-version.sh" ]; then
+            chmod +x "../scripts/cc-version.sh"
+            echo "✅ 已修复 cc-version.sh 权限"
+          else
+            echo "⚠️ 警告: cc-version.sh 文件不存在"
+          fi
+          
+          echo "✅ 所有脚本权限已修复"
+      
+      # ====================== 编译阶段 ======================
+      - name: "🔨 Build Kernel | 编译内核"
+        run: |
+          echo "🏗️ 开始内核编译..."
+          cd kernel_workspace/kernel_platform/common
+          
+          # 安装 LLVM 工具链（包含 ld.lld）
+          echo "⬇️ 安装 LLVM 工具链..."
+          sudo apt-get update
+          sudo apt-get install -y llvm lld clang
+          
+          # 验证 ld.lld 是否存在
+          if ! command -v ld.lld &> /dev/null; then
+            echo "❌ 错误：ld.lld 链接器未找到！"
+            exit 1
+          else
+            echo "✅ ld.lld 链接器位置: $(which ld.lld)"
+          fi
+          
+          # 应用自定义标识
+          CUSTOM_VERSION="${{ env.CUSTOM_KERNEL_VERSION }}"
+          echo "应用自定义标识: $CUSTOM_VERSION"
+          
+          # 获取原始版本号作为基础
+          BASE_VERSION=$(make kernelversion)
+          echo "原始内核版本: $BASE_VERSION"
+          
+          # 构建完整版本字符串
+          FULL_VERSION="${BASE_VERSION}-${CUSTOM_VERSION}"
+          echo "完整版本: $FULL_VERSION"
+          
+          # 设置链接器路径
+          LD_PATH=$(which ld.lld)
+          echo "使用链接器: $LD_PATH"
+          
+          # 修复可能的权限问题
+          echo "🔧 修复文件权限..."
+          sudo chown -R $USER:$USER .
+          find . -type f -exec chmod 644 {} \;
+          find . -type d -exec chmod 755 {} \;
+          
+          # 确保脚本有执行权限
+          find . -name "*.sh" -exec chmod +x {} \;
+          
+          # 清理构建环境
+          echo "🧹 清理构建环境..."
+          make clean || true
+          make mrproper || true
+          
+          # 根据不同内核版本执行编译
+          if [ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.1" ]; then
+              export KBUILD_BUILD_TIMESTAMP="Thu May 29 07:25:40 UTC 2025"
+              export KBUILD_BUILD_VERSION=1
+              export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH"
+              export PATH="/usr/lib/ccache:$PATH"
+              sudo apt install libelf-dev
+              
+              # 使用更少的线程数编译，避免资源耗尽
+              make -j$(($(nproc)/2)) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                  CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                  PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                  LD="$LD_PATH" HOSTLD="$LD_PATH" O=out KCFLAGS+=-O2 \
+                  LOCALVERSION="-$CUSTOM_VERSION" \
+                  KERNELRELEASE="$FULL_VERSION" \
+                  gki_defconfig all
+              
+          elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.15" ]; then
+              export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
+              export PATH="/usr/lib/ccache:$PATH"
+              sudo apt install libelf-dev
+              
+              # 使用更少的线程数编译，避免资源耗尽
+              make -j$(($(nproc)/2)) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                  CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                  PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                  LD="$LD_PATH" HOSTLD="$LD_PATH" O=out \
+                  LOCALVERSION="-$CUSTOM_VERSION" \
+                  KERNELRELEASE="$FULL_VERSION" \
+                  gki_defconfig all
+              
+          elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.10" ]; then
+              export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+              export PATH="/usr/lib/ccache:$PATH"
+              sudo apt install libelf-dev
+              
+              # 使用更少的线程数编译，避免资源耗尽
+              make -j$(($(nproc)/2)) LLVM_IAS=1 LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                  CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                  PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                  LD="$LD_PATH" HOSTLD="$LD_PATH" O=out \
+                  LOCALVERSION="-$CUSTOM_VERSION" \
+                  KERNELRELEASE="$FULL_VERSION" \
+                  gki_defconfig all
+          fi
+          
+          # 如果编译失败，尝试单线程编译
+          if [ $? -ne 0 ]; then
+            echo "⚠️ 多线程编译失败，尝试单线程编译..."
+            if [ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.1" ]; then
+                make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                    CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                    PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                    LD="$LD_PATH" HOSTLD="$LD_PATH" O=out KCFLAGS+=-O2 \
+                    LOCALVERSION="-$CUSTOM_VERSION" \
+                    KERNELRELEASE="$FULL_VERSION" \
+                    gki_defconfig all
+            elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.15" ]; then
+                make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                    CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                    PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                    LD="$LD_PATH" HOSTLD="$LD_PATH" O=out \
+                    LOCALVERSION="-$CUSTOM_VERSION" \
+                    KERNELRELEASE="$FULL_VERSION" \
+                    gki_defconfig all
+            elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.10" ]; then
+                make LLVM_IAS=1 LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+                    CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+                    PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+                    LD="$LD_PATH" HOSTLD="$LD_PATH" O=out \
+                    LOCALVERSION="-$CUSTOM_VERSION" \
+                    KERNELRELEASE="$FULL_VERSION" \
+                    gki_defconfig all
+            fi
+          fi
+          
+          # 显示ccache统计信息
+          ccache -s
+          echo "✅ 内核编译完成"
+      
+      # ====================== 打包阶段 ======================
+      - name: "📦 Package Kernel | 打包内核"
+        run: |
+          echo "📦 准备AnyKernel3打包环境..."
+          git clone https://github.com/Xiaomichael/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          mkdir -p kernel_workspace/kernel_platform/out/Final-Image-Find/
+          
+          dir1=""
+          dir2=""
+          image_path=$(find "./kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
+          if [ -n "$image_path" ]; then
+            dir1=$(dirname "$image_path")/
+            echo "✅ 使用 make 编译的统一路径，成功找到 Image 文件 ✅"
+          fi
+          
+          if [ -n "$image_path" ] && [ -f "$image_path" ]; then
+            echo "Image file finally located at: $image_path"
+            cp "$image_path" ./AnyKernel3/Image
+            cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
+          fi
+      
+      - name: "🧩 Patch Kernel Image (KPM) | KPM修补镜像"
+        if: ${{ github.event.inputs.KPM == 'On' }}
+        run: |
+          echo "🔧 正在应用KPM补丁..."
+          cd kernel_workspace/kernel_platform/out/Final-Image-Find
+          curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/patch_linux
+          chmod +x patch_linux
+          ./patch_linux
+          rm -f Image
+          mv oImage Image
+          cp Image $GITHUB_WORKSPACE/AnyKernel3/Image
+          echo "✅ KPM补丁应用完成"
+      
+      # ====================== 上传阶段 ======================
+      - name: "🧠 Set Artifact Name | 设置产物名称"
+        id: set_name
+        run: |
+          if [ "${{ github.event.inputs.lz4kd }}" = "On" ]; then
+            echo "ARTIFACT_NAME=AnyKernel3_SukiSU_Ultra_lz4kd_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
+            echo "ARTIFACT_NAME=AnyKernel3_SukiSU_Ultra_lz4_zstd_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}" >> $GITHUB_OUTPUT
+          else
+            echo "ARTIFACT_NAME=AnyKernel3_SukiSU_Ultra_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: "📤 Upload AnyKernel3 | 上传 AnyKernel3"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}
+          path: ./AnyKernel3/*
+      
+      - name: "📝 Find zram.ko & crypto_zstdn.ko | 查找 zram.ko & crypto_zstdn.ko"
+        if: ${{ github.event.inputs.lz4kd == 'On' }}
+        run: |
+          find -name zram.ko
+          find -name crypto_zstdn.ko
+      
+      - name: "📤 Upload zram.ko | 上传 zram.ko"
+        if: ${{ github.event.inputs.lz4kd == 'On' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: zram.ko
+          path: ./kernel_workspace/kernel_platform/common/out/drivers/block/zram/zram.ko
+      
+      - name: "🤖 Get bot script | 获取 bot 脚本"
+        uses: actions/checkout@v4
+        with:
+          path: bot
+      
+      - name: "📤 Upload to telegram | 上传至Telegram群组"
+        run: |
+          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
+            echo "📤 正在上传到Telegram..."
+            cd AnyKernel3
+            zip -q -r "../${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip" ./*
+            cd ..
+            
+            pip3 install telethon
+            python3 ./bot/script/buildbot.py "./${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip"
+            echo "✅ 文件已上传到Telegram"
+          fi
+        env:
+          CHATID: ${{secrets.CHATID}}
+          BOT_TOKEN: ${{secrets.BOT_TOKEN}}
+          MESSAGE_THREAD_ID: ${{secrets.MESSAGE_THREAD_ID}}
+          KernelVer: ${{ github.event.inputs.ANDROID_VERSION}}-${{ github.event.inputs.KERNEL_VERSION }}
+          DEVICE: ${{ github.event.inputs.FEIL }}
+          KPM: ${{ github.event.inputs.KPM }}
+          LZ4KD: ${{ github.event.inputs.lz4kd }}
+          BBR: ${{ github.event.inputs.bbr }}
+          KSUVERSIONS: ${{env.KSUVER_STR}}(${{env.KSUVER}})
+          CUSTOM_VERSION: ${{ env.CUSTOM_KERNEL_VERSION }}

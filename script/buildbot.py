@@ -39,6 +39,7 @@ def get_caption():
         kpm=KPM,
         lz4kd=lz4kd,
         Ksuver=ksuver,
+        KSU_VAR=KSU_VAR,
         lz4_zstd=check_lz4_zstd(),
         BBR=BBR,
     )

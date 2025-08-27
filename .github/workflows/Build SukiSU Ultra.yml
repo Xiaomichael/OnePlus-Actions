@@ -46,7 +46,7 @@ on:
           - 'onrplus_nord_4'
           - 'oneplus_nord_ce4_lite_5g'
           - 'oneplus_nord_ce4'
-        default: 'oneplus_12'
+        default: 'oneplus_ace5'
         
       CPUD:
         description: "处理器代号"
@@ -87,7 +87,7 @@ on:
        options:
            - 'On'
            - 'Off'
-       default: 'Off'
+       default: 'On'
        
       lz4kd:
        description: "是否启用lz4kd(关闭则6.1系启用lz4 + zstd)"
@@ -96,7 +96,7 @@ on:
        options:
           - 'On'
           - 'Off'
-       default: 'Off'
+       default: 'On'
        
       bbr:
        description: "是否启用bbr算法(优化上行数据, 对手机日用无太大意义甚至可能负优化)"
@@ -249,9 +249,9 @@ jobs:
           sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/common/scripts/setlocalversion
           sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/msm-kernel/scripts/setlocalversion
           sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/external/dtc/scripts/setlocalversion
-          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/common/scripts/setlocalversion            
-          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/msm-kernel/scripts/setlocalversion
-          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
+          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-android14-11-0-gca13bffobf09"|' kernel_platform/common/scripts/setlocalversion            
+          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-android14-11-0-gca13bffobf09"|' kernel_platform/msm-kernel/scripts/setlocalversion
+          sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-android14-11-0-gca13bffobf09"|' kernel_platform/external/dtc/scripts/setlocalversion
 
           echo "✅ 内核配置完成"
          
@@ -542,42 +542,6 @@ jobs:
             # LZ4KD 状态: ${{ github.event.inputs.lz4kd }}
             # ```
             # EOF
-
-      # - name: "📤 Upload to telegram | 上传至Telegram群组"
-        # uses: puernya/tg-bot-upload@v1
-        # with:
-          # bot-id: ${{ secrets.BOT_TOKEN }}
-          # chat-id: ${{ secrets.CHATID }}
-          # topic-id: ${{ secrets.MESSAGE_THREAD_ID }} 
-          # file-path: "${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip"
-          # caption-path: release.txt
-
-      - name: "🤖 Get bot script | 获取 bot 脚本"
-        uses: actions/checkout@v4
-        with:
-          path: bot
-
-      - name: "📤 Upload to telegram | 上传至Telegram群组"
-        run: |
-          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
-            echo "📤 正在上传到Telegram..."
-            cd AnyKernel3
-            zip -q -r "../${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip" ./*
-            cd ..
-            pip3 install telethon
-            python3 ./bot/script/buildbot.py "./${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip"
-            echo "✅ 文件已上传到Telegram"
-          fi
-        env:
-          CHATID: ${{secrets.CHATID}}
-          BOT_TOKEN: ${{secrets.BOT_TOKEN}}
-          MESSAGE_THREAD_ID: ${{secrets.MESSAGE_THREAD_ID}}
-          KernelVer: ${{ github.event.inputs.ANDROID_VERSION}}-${{ github.event.inputs.KERNEL_VERSION }}
-          DEVICE: ${{ github.event.inputs.FEIL }}
-          KPM: ${{ github.event.inputs.KPM }}
-          LZ4KD: ${{ github.event.inputs.lz4kd }}
-          BBR: ${{ github.event.inputs.bbr }}
-          KSU_VAR: "SukiSU"
           
       - name: 📊 Post-build disk check (构建后空间检查)
         run: df -h

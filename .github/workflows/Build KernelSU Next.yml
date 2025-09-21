@@ -255,10 +255,13 @@ jobs:
           echo "✅ 内核配置完成"
 
       - name: "⚡ Setup Baseband-guard | 配置bbg Baseband-guard"
+        if: ${{ github.event.inputs.bbg == 'On' }}
         run: |
+          set -e
           cd kernel_workspace/kernel_platform/common
-          curl -LSs "https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/tree/main" -o setup.sh && bash setup.sh
-          echo >> ./arch/arm64/configs/gki_defconfig
+          curl -sSL https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh -o setup.sh
+          bash setup.sh
+
           
       # ====================== 内核定制阶段 ======================
       - name: "⚡ Setup KernelSU Next | 配置 KernelSU Next"

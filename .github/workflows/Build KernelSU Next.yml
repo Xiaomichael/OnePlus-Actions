@@ -97,7 +97,14 @@ on:
           - 'On'
           - 'Off'
        default: 'Off'
-
+      bbg:
+        description: "是否添加BBG防格机模块"
+        required: true
+        type: choice
+        options:
+           - 'On'
+           - 'Off'
+        default: 'On'
       proxy:
        description: "是否添加代理性能优化(MTK系列跑的时候请关闭否则出现恶性bug)"
        required: true
@@ -244,7 +251,12 @@ jobs:
           sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
 
           echo "✅ 内核配置完成"
-
+      - name: Set Baseband-guard (配置bbg)
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          curl -LSs "https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/tree/main" -o setup.sh && bash setup.sh
+          echo >> ./arch/arm64/configs/gki_defconfig
+          
       # ====================== 内核定制阶段 ======================
       - name: "⚡ Setup KernelSU Next | 配置 KernelSU Next"
         run: |
@@ -334,7 +346,10 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-            
+          if [ "${{ github.event.inputs.bbg }}" == "On" ]; then
+            echo 'CONFIG_BBG=y' >> ./arch/arm64/configs/gki_defconfig
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./arch/arm64/configs/gki_defconfig
+          fi
           if [ "${{ github.event.inputs.bbr }}" == "On" ]; then
             echo "🌐 启用BBR网络算法..."
             echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig

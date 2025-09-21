@@ -354,8 +354,9 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
 
           if [ "${{ github.event.inputs.bbg }}" == "On" ]; then
-            echo 'CONFIG_BBG=y' >> ./arch/arm64/configs/gki_defconfig
-            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./arch/arm64/configs/gki_defconfig
+            echo "⚡ 启用BBG防格机补丁..."
+            echo 'CONFIG_BBG=y' >> ./common/arch/arm64/configs/gki_defconfig
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./common/arch/arm64/configs/gki_defconfig
           fi
           
           if [ "${{ github.event.inputs.bbr }}" == "On" ]; then

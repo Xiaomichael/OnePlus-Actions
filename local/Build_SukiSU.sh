@@ -130,12 +130,11 @@ sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/common/scri
 sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/msm-kernel/scripts/setlocalversion
 sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
 echo "✅ Kernel source cloned and configured."
-cd ..
 # Back to $WORKSPACE
 
 if [ "$bbg" = "On" ]; then
     set -e
-    cd kernel_workspace/kernel_platform/common
+    cd kernel_platform/common
     curl -sSL https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh -o setup.sh
     bash setup.sh
     cd ../..

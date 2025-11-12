@@ -115,7 +115,7 @@ echo "🔄 Syncing repositories (using $(nproc --all) threads)..."
 repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync
 
 export adv=$ANDROID_VERSION
-echo "kernel_name: -$adv-oki-xiaoxiaow"
+echo "kernel_name: -$adv-oki-shirakamiame"
 echo "🔧 Cleaning up and modifying version strings..."
 rm -f kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports to remove from common!"
 rm -f kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports to remove from msm-kernel!"
@@ -126,9 +126,9 @@ sed -i 's/ -dirty//g' kernel_platform/external/dtc/scripts/setlocalversion
 sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/common/scripts/setlocalversion
 sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/msm-kernel/scripts/setlocalversion
 sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/external/dtc/scripts/setlocalversion
-sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/common/scripts/setlocalversion
-sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/msm-kernel/scripts/setlocalversion
-sed -i '$s|echo "\$res"|echo "-$adv-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
+sed -i '$s|echo "\$res"|echo "-$adv-oki-shirakamiame"|' kernel_platform/common/scripts/setlocalversion
+sed -i '$s|echo "\$res"|echo "-$adv-oki-shirakamiame"|' kernel_platform/msm-kernel/scripts/setlocalversion
+sed -i '$s|echo "\$res"|echo "-$adv-oki-shirakamiame"|' kernel_platform/external/dtc/scripts/setlocalversion
 echo "✅ Kernel source cloned and configured."
 
 if [ "$bbg" = "On" ]; then
@@ -162,7 +162,7 @@ if [ -z "$KSU_API_VERSION" ]; then
 fi
 
 KSU_COMMIT_HASH=$(git ls-remote https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/susfs-main | cut -f1 | cut -c1-8)
-KSU_VERSION_FULL="v${KSU_API_VERSION}-${KSU_COMMIT_HASH}-xiaoxiaow"
+KSU_VERSION_FULL="v${KSU_API_VERSION}-${KSU_COMMIT_HASH}-shirakamiame"
 
 # 删除旧定义
 sed -i '/define get_ksu_version_full/,/endef/d' kernel/Makefile
@@ -176,7 +176,7 @@ while IFS= read -r line; do
   if echo "$line" | grep -q 'REPO_OWNER :='; then
     cat >> "$TMP_FILE" <<EOF
 define get_ksu_version_full
-v\\\$\$1-${KSU_COMMIT_HASH}-xiaoxiaow
+v\\\$\$1-${KSU_COMMIT_HASH}-shirakamiame
 endef
 
 KSU_VERSION_API := ${KSU_API_VERSION}

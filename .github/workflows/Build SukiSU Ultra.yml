@@ -45,7 +45,6 @@ on:
           - 'oneplus_ace_3v'
           - 'onrplus_nord_4'
           - 'oneplus_nord_ce4_lite_5g'
-          - 'oneplus_nord_ce4'
         default: 'oneplus_12'
         
       ANDROID_VERSION:
@@ -350,7 +349,7 @@ jobs:
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-          #添加对 Mountify (backslashxx/mountify) 模块的支持
+          # 添加对 Mountify (backslashxx/mountify) 模块的支持
           echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
 
@@ -482,7 +481,7 @@ jobs:
         run: |
           echo "🔧 正在应用KPM补丁..."
           cd kernel_workspace/kernel_platform/out/Final-Image-Find
-          curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.1/patch_linux
+          curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.2/patch_linux
           chmod +x patch_linux
           ./patch_linux
           rm -f Image

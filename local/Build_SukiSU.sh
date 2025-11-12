@@ -391,7 +391,7 @@ cp "$IMAGE_PATH" ./AnyKernel3/Image
 if [ "$KPM" = 'On' ]; then
     echo "🧩 Applying KPM patch to kernel Image..."
     mkdir -p kpm_patch_temp && cd kpm_patch_temp
-    curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.1/patch_linux
+    curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.2/patch_linux
     chmod +x patch_linux
     cp "$WORKSPACE/AnyKernel3/Image" ./Image
     ./patch_linux

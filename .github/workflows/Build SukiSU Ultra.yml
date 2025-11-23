@@ -165,7 +165,7 @@ jobs:
       - name: "📦 Cache & Install Dependencies | 缓存 & 安装构建依赖"
         uses: awalsh128/cache-apt-pkgs-action@latest 
         with: 
-          packages: python3 git curl ccache libelf-dev build-essential flex bison libssl-dev libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk
+          packages: python3 git curl ccache libelf-dev build-essential flex bison libssl-dev libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk dos2unix
           execute_install_scripts: true
 
       # ====================== 缓存管理阶段 ======================
@@ -332,16 +332,30 @@ jobs:
 
           echo "✅ 所有补丁应用完成"
 
-      - name: "⚙️ Apply HMBIRD_OGKI to HMBIRD_GKI | OGKI转换GKI"
+      - name: "⚙️ Apply SCHED Patch | 应用风驰补丁"
         if: ${{ github.event.inputs.KERNEL_VERSION == '6.6'}}
         run: |
           cd kernel_workspace/kernel_platform/common
-          sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
-          wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
-          echo "⚙️ 正在打OGKI转换GKI补丁"
-          patch -p1 -F 3 < hmbird_patch.patch
-          echo "✅ OGKI转换GKI_patch完成"
-
+          echo "正在拉取风驰补丁"
+          if ["${{ github.event.inputs.KERNEL_VERSION}}" = "oneplus_ace5_ultra"]; then
+              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
+          else
+              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"
+          fi
+          cp ./SCHED_PATCH/fengchi_${{ github.event.inputs.FEIL}}.patch ./
+          if [[ -f "fengchi_${{ github.event.inputs.FEIL}}.patch" ]]; then
+            echo "开始应用风驰补丁"
+            dos2unix "fengchi_${{ github.event.inputs.FEIL}}.patch"
+            patch -p1 -F 3 < "fengchi_${{ github.event.inputs.FEIL}}.patch"
+            echo "完美风驰补丁应用完成"
+          else
+            sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
+            wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
+            echo "⚙️ 正在打OGKI转换GKI补丁"
+            patch -p1 -F 3 < hmbird_patch.patch
+            echo "✅ OGKI转换GKI_patch完成"
+          fi
+          
       - name: "⚙️ Configure Kernel Options | 配置内核选项"
         run: |
           cd kernel_workspace/kernel_platform

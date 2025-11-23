@@ -253,14 +253,28 @@ echo "✅ 所有补丁应用完成。"
 cd ../..
 # 回到 $WORKSPACE/kernel_workspace
 
-# 6.6 专用 HMBIRD OGKI → GKI 补丁
+# 6.6 专用 风驰补丁 or OGKI转GKI
 if [ "$KERNEL_VERSION" = "6.6" ]; then
-  echo "⚙️ 正在应用 HMBIRD OGKI → GKI 补丁..."
-  cd kernel_platform/common
-  sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
-  wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
-  patch -p1 -F 3 < hmbird_patch.patch || true
-  echo "✅ HMBIRD OGKI → GKI 补丁应用完成。"
+  echo "正在拉取风驰补丁"
+  if ["$FEIL" = "oneplus_ace5_ultra"]; then
+      git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
+  else
+      git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"
+  fi
+  cp ./SCHED_PATCH/fengchi_$FEIL.patch ./
+  if [[ -f "fengchi_$FEIL.patch" ]]; then
+    echo "开始应用风驰补丁"
+    dos2unix "fengchi_$FEIL.patch"
+    patch -p1 -F 3 < "fengchi_$FEIL.patch"
+    echo "完美风驰补丁应用完成"
+  else
+    echo "该机型暂不支持风驰补丁，正在应用OGKI转GKI补丁"
+    sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
+    wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
+    echo "⚙️ 正在打OGKI转换GKI补丁"
+    patch -p1 -F 3 < hmbird_patch.patch
+    echo "✅ OGKI转换GKI_patch完成"
+  fi
   cd ../..
 fi
 

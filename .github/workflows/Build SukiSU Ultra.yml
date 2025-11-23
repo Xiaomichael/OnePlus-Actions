@@ -337,7 +337,7 @@ jobs:
         run: |
           cd kernel_workspace/kernel_platform/common
           echo "正在拉取风驰补丁"
-          if ["${{ github.event.inputs.KERNEL_VERSION}}" = "oneplus_ace5_ultra"]; then
+          if ["${{ github.event.inputs.FEIL}}" = "oneplus_ace5_ultra"]; then
               git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
           else
               git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"

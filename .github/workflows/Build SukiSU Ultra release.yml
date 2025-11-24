@@ -278,7 +278,13 @@ jobs:
           rm -rf ./sukisu_setup.bin
           
           echo "✅ SukiSU Ultra配置完成"
-          
+      - name: Fix task_mmu.c compilation error
+        run: |
+         cd kernel_workspace/kernel_platform/common
+         # 使用 sed 修复编译错误
+         sed -i '1018s/goto show_pad;/\/\/ goto show_pad; fixed compilation error/' fs/proc/task_mmu.c
+         # 或者更安全的修复方式
+         sed -i '1018s/goto show_pad;/break; \/\/ fixed: removed undefined label/' fs/proc/task_mmu.c    
       - name: "🔧 Setup SUSFS | 配置 SUSFS"
         run: |
           cd kernel_workspace

@@ -277,14 +277,7 @@ jobs:
           ./sukisu_setup.bin
           rm -rf ./sukisu_setup.bin
           
-          echo "✅ SukiSU Ultra配置完成"
-      - name: Fix task_mmu.c compilation error
-        run: |
-         cd kernel_workspace/kernel_platform/common
-         # 使用 sed 修复编译错误
-         sed -i '1018s/goto show_pad;/\/\/ goto show_pad; fixed compilation error/' fs/proc/task_mmu.c
-         # 或者更安全的修复方式
-         sed -i '1018s/goto show_pad;/break; \/\/ fixed: removed undefined label/' fs/proc/task_mmu.c    
+          echo "✅ SukiSU Ultra配置完成"    
       - name: "🔧 Setup SUSFS | 配置 SUSFS"
         run: |
           cd kernel_workspace
@@ -483,7 +476,28 @@ jobs:
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
           echo "✅ 内核配置更新完成"
+       # ============ 在这里添加 5.10 内核修复 ============
+      - name: "🔧 Fix 5.10 Kernel Compilation | 修复5.10内核编译"
+        if: ${{ github.event.inputs.KERNEL_VERSION == '5.10' }}
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          echo "🔧 修复5.10内核编译错误..."
           
+          if [ -f "fs/proc/task_mmu.c" ]; then
+            echo "=== 诊断信息 ==="
+            echo "文件行数: $(wc -l < fs/proc/task_mmu.c)"
+            echo "=== 第1018行上下文 ==="
+            sed -n '1010,1025p' fs/proc/task_mmu.c
+            echo "=== 所有 show_pad 引用 ==="
+            grep -n "show_pad" fs/proc/task_mmu.c
+            
+            # 应用修复
+            echo "应用修复..."
+            sed -i '1018s/goto show_pad;/break; \/\/ FIXED_5.10_KERNEL/' fs/proc/task_mmu.c
+            echo "✅ 5.10内核修复完成"
+          else
+            echo "❌ task_mmu.c 文件不存在"
+          fi   
       - name: "🔨 Build Kernel | 编译内核"
         run: |
           echo "🏗️ 开始内核编译..."

@@ -476,7 +476,6 @@ jobs:
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
           echo "✅ 内核配置更新完成"
-       # ============ 在这里添加 5.10 内核修复 ============
       - name: "🔧 Fix 5.10 Kernel Compilation | 修复5.10内核编译"
         if: ${{ github.event.inputs.KERNEL_VERSION == '5.10' }}
         run: |
@@ -484,20 +483,19 @@ jobs:
           echo "🔧 修复5.10内核编译错误..."
           
           if [ -f "fs/proc/task_mmu.c" ]; then
-            echo "=== 诊断信息 ==="
-            echo "文件行数: $(wc -l < fs/proc/task_mmu.c)"
-            echo "=== 第1018行上下文 ==="
-            sed -n '1010,1025p' fs/proc/task_mmu.c
-            echo "=== 所有 show_pad 引用 ==="
-            grep -n "show_pad" fs/proc/task_mmu.c
+            # 备份原文件
+            cp fs/proc/task_mmu.c fs/proc/task_mmu.c.backup
             
-            # 应用修复
-            echo "应用修复..."
-            sed -i '1018s/goto show_pad;/break; \/\/ FIXED_5.10_KERNEL/' fs/proc/task_mmu.c
+            # 方法1：添加缺失的标签（在 goto 语句后）
+            sed -i '/goto show_pad;/a\
+            show_pad:\; // empty statement' fs/proc/task_mmu.c            
+            # 方法2：如果方法1不行，注释掉整个有问题的 goto 语句
+            # sed -i 's/goto show_pad;/\/\/ goto show_pad; REMOVED_FOR_COMPILATION/' fs/proc/task_mmu.c
+            
+            echo "=== 修复验证 ==="
+            grep -A2 -B2 "show_pad" fs/proc/task_mmu.c
             echo "✅ 5.10内核修复完成"
-          else
-            echo "❌ task_mmu.c 文件不存在"
-          fi   
+          fi
       - name: "🔨 Build Kernel | 编译内核"
         run: |
           echo "🏗️ 开始内核编译..."

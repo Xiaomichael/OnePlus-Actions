@@ -22,7 +22,7 @@ ask() {
 
 # --- 交互输入 ---
 CPU=$(ask "请输入 CPU 分支 (例如: sm8750, sm8650, sm8550, sm8475)" "sm8650")
-FEIL=$(ask "请输入手机型号 (例如: oneplus_13_b, oneplus_12, oneplus_11)" "oneplus_12")
+FEIL=$(ask "请输入手机型号 (例如: oneplus_13_b, oneplus_12_b, oneplus_11)" "oneplus_12_b")
 ANDROID_VERSION=$(ask "请输入安卓 KMI 版本 (android15, android14, android13, android12)" "android14")
 KERNEL_VERSION=$(ask "请输入内核版本 (6.6, 6.1, 5.15, 5.10)" "6.1")
 KPM=$(ask "是否启用 KPM (Kernel Patch Manager)? (On/Off)" "Off")

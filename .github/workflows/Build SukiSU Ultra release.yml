@@ -34,12 +34,12 @@ on:
           - 'oneplus_pad_2_pro_b'
           - 'oneplus_pad_3_b'
           - 'oneplus_ace5_ultra'
-          - 'oneplus_12'
-          - 'oneplus_ace3_pro'
-          - 'oneplus_ace5'
-          - 'oneplus_13r'
-          - 'oneplus_pad2'
-          - 'oneplus_pad_pro'
+          - 'oneplus_12_b'
+          - 'oneplus_ace3_pro_v'
+          - 'oneplus_ace5_b'
+          - 'oneplus_13r_b'
+          - 'oneplus_pad2_v'
+          - 'oneplus_pad_pro_v'
           - 'oneplus_ace5_race'
           - 'oneplus_nord_5'
           - 'oneplus_11'
@@ -55,7 +55,7 @@ on:
           - 'oneplus_ace_3v'
           - 'onrplus_nord_4'
           - 'oneplus_nord_ce4_lite_5g'
-        default: 'oneplus_12'
+        default: 'oneplus_12_b'
         
       ANDROID_VERSION:
         description: "安卓KMI版本"

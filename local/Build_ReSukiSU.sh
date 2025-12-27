@@ -143,7 +143,7 @@ fi
 
 echo "⚡ 正在配置 ReSukiSU..."
 cd kernel_platform
-curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/builtin/kernel/setup.sh" | bash -s builtin
+curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
 
 cd KernelSU
 KSU_VERSION_COUNT=$(git rev-list --count main)

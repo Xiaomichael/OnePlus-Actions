@@ -283,7 +283,7 @@ jobs:
 
           # 下载并执行设置脚本
           echo "🛠️ 正在设置ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/builtin/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
           
           cd KernelSU
           echo "⬇️ 下载ReSukiSU设置工具..."

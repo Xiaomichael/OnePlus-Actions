@@ -113,11 +113,11 @@ sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/msm-ker
 sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/external/dtc/scripts/setlocalversion
 
 if [ "$KERNEL_VERSION" != "6.6" ]; then
-  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-xiaoxiaow"|' kernel_platform/common/scripts/setlocalversion
-  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-xiaoxiaow"|' kernel_platform/msm-kernel/scripts/setlocalversion
-  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
+  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-ziantt"|' kernel_platform/common/scripts/setlocalversion
+  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-ziantt"|' kernel_platform/msm-kernel/scripts/setlocalversion
+  sed -i '$s|echo "\$res"|echo "-'"$adv"'-oki-ziantt"|' kernel_platform/external/dtc/scripts/setlocalversion
 else
-  ESCAPED_SUFFIX=$(printf '%s\n' "-${ANDROID_VERSION}-oki-xiaoxiaow" | sed 's:[\/&]:\\&:g')
+  ESCAPED_SUFFIX=$(printf '%s\n' "-${ANDROID_VERSION}-oki-ziantt" | sed 's:[\/&]:\\&:g')
   sed -i "s/-4k/${ESCAPED_SUFFIX}/g" kernel_platform/common/arch/arm64/configs/gki_defconfig
   sed -i 's/\${scm_version}//' kernel_platform/common/scripts/setlocalversion
   sed -i 's/\${scm_version}//' kernel_platform/msm-kernel/scripts/setlocalversion
@@ -146,7 +146,7 @@ export KSUVER=40129
 
 KSU_API_VERSION=4.0.0
 
-KSU_VERSION_FULL="v${KSU_API_VERSION}-40129-xiaoxiaow@builtin"
+KSU_VERSION_FULL="v${KSU_API_VERSION}-40129-ziantt@builtin"
 
 sed -i '/define get_ksu_version_full/,/endef/d' kernel/Makefile
 sed -i '/KSU_VERSION_API :=/d' kernel/Makefile
@@ -158,7 +158,7 @@ while IFS= read -r line; do
   if echo "$line" | grep -q 'REPO_OWNER :='; then
     cat >> "$TMP_FILE" <<EOF
 define get_ksu_version_full
-v\\\$\$1-40129-xiaoxiaow@builtin
+v\\\$\$1-40129-ziantt@builtin
 endef
 
 KSU_VERSION_API := ${KSU_API_VERSION}

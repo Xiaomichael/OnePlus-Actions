@@ -35,11 +35,11 @@ on:
           - 'oneplus_pad_3_b'
           - 'oneplus_ace5_ultra_b'
           - 'oneplus_12_b'
-          - 'oneplus_ace3_pro_v'
+          - 'oneplus_ace3_pro_b'
           - 'oneplus_ace5_b'
           - 'oneplus_13r_b'
-          - 'oneplus_pad2_v'
-          - 'oneplus_pad_pro_v'
+          - 'oneplus_pad2_b'
+          - 'oneplus_pad_pro_b'
           - 'oneplus_ace5_race_b'
           - 'oneplus_ace5_race_v'
           - 'oneplus_nord_5_b'
@@ -49,8 +49,8 @@ on:
           - 'oneplus_ace3_b'
           - 'oneplus_open_b'
           - 'oneplus_10t'
-          - 'oneplus_11r'
-          - 'oneplus_ace2'
+          - 'oneplus_11r_b'
+          - 'oneplus_ace2_b'
           - 'oneplus_ace_pro'
           - 'oneplus_10_pro_v'
           - 'oneplus_ace_3v_b'
@@ -135,13 +135,13 @@ on:
         default: 'On'
 
       UNICODE_BYPASS:
-        description: "是否添加Unicode零宽绕过修复补丁"
+        description: "是否添加Unicode零宽绕过修复补丁(高内核版本不推荐开启, 建议使用 https://t.me/real5ec1cff/268 无痛修复)"
         required: true
         type: choice
         options:
           - 'On'
           - 'Off'
-        default: 'On'
+        default: 'Off'
          
 jobs:
   build:

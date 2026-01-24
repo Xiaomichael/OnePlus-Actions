@@ -262,7 +262,6 @@ fi
 echo "⚙️ 正在配置内核编译选项..."
 DEFCONFIG_PATH="$WORKSPACE/kernel_workspace/kernel_platform/common/arch/arm64/configs/gki_defconfig"
 
-cat <<EOT >> "$DEFCONFIG_PATH"
 
 echo "CONFIG_KSU=y" >> "$DEFCONFIG_PATH"
 

@@ -51,7 +51,7 @@ on:
           - 'oneplus_10t'
           - 'oneplus_11r_b'
           - 'oneplus_ace2_b'
-          - 'oneplus_ace_pro'
+          - 'oneplus_ace_pro_v'
           - 'oneplus_10_pro_v'
           - 'oneplus_ace_3v_b'
           - 'oneplus_nord_4_b'
@@ -231,7 +231,7 @@ jobs:
           mkdir kernel_workspace && cd kernel_workspace
 
           echo "🌐 正在初始化内核仓库..."
-          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
+          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
 
           echo "🔄 同步代码库(使用$(nproc --all)线程)..."
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync

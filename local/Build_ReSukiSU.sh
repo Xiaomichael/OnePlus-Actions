@@ -1,14 +1,12 @@
 #!/bin/bash
 #export all_proxy=socks5://192.168.x.x:x/
 set -e
-
 clear
 echo "==============================================="
-echo "  ReSukiSU OnePlus Kernel Build Configuration  "
+echo "  ReSukiSU realme 全机型内核编译配置工具  "
 echo "==============================================="
 echo "  按回车键可直接使用 [方括号] 中的默认值"
 echo ""
-
 ask() {
     local prompt default reply
     prompt="$1"
@@ -18,8 +16,9 @@ ask() {
     echo "${reply:-$default}"
 }
 
-CPU=$(ask "请输入 CPU 分支 (例如: sm8750, sm8650, sm8550, sm8475)" "sm8650")
-FEIL=$(ask "请输入手机型号 (例如: oneplus_13_b, oneplus_12_b, oneplus_11_b)" "oneplus_12_b")
+# 适配真我全机型核心参数配置，覆盖主流高通/联发科平台
+CPU=$(ask "请输入 CPU 分支 (高通: sm8750/sm8650/sm8550/sm8475/sm8350; 联发科: mt6991/mt6990/mt6985/mt6895)" "sm8650")
+FEIL=$(ask "请输入手机型号 (例如: realme_gt6, realme_gt5, realme_gtneo6, realme_13_pro_plus, realme_gtneo5_se)" "realme_gt6")
 ANDROID_VERSION=$(ask "请输入内核安卓 KMI 版本 (android15, android14, android13, android12)" "android14")
 KERNEL_VERSION=$(ask "请输入内核版本 (6.6, 6.1, 5.15, 5.10)" "6.1")
 SUSFS=$(ask "是否启用 SUSFS? (On/Off)" "Off")
@@ -27,8 +26,8 @@ KPM=$(ask "是否启用 KPM (Kernel Patch Manager)? (On/Off)" "Off")
 lz4kd=$(ask "是否启用 lz4kd? (6.1 关闭时使用 lz4 + zstd; 6.6 关闭时使用 lz4) (On/Off)" "Off")
 bbr=$(ask "是否启用 BBR 拥塞控制算法? (On/Off)" "Off")
 bbg=$(ask "是否启用 Baseband-Guard 基带防护? (On/Off)" "On")
-proxy=$(ask "是否添加代理性能优化? (如为联发科 CPU 必须选择 Off) (On/Off)" "On")
-UNICODE_BYPASS=$(ask "是否添加Unicode零宽绕过修复补丁(高内核版本不推荐开启, 建议使用 https://t.me/real5ec1cff/271 无痛修复) (On/Off)" "Off")
+proxy=$(ask "是否添加代理性能优化? (联发科 CPU 必须选择 Off) (On/Off)" "On")
+UNICODE_BYPASS=$(ask "是否添加Unicode零宽绕过修复补丁(高内核版本不推荐开启) (On/Off)" "Off")
 
 clear
 echo ""
@@ -64,8 +63,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends 
   libncurses-dev liblz4-tool zlib1g-dev \
   libxml2-utils rsync unzip python3-pip gawk dos2unix
 clear
-echo "✅ 必要构建依赖安装完成"
 
+echo "✅ 必要构建依赖安装完成"
 echo "⚙️ 正在配置 ccache 缓存..."
 if [ "$SUSFS" == "On" ]; then
   export CCACHE_DIR="$HOME/.ccache_${FEIL}_ReSukiSU_SUSFS"
@@ -101,9 +100,9 @@ echo "⬇️ 正在准备内核源码目录..."
 sudo rm -rf kernel_workspace
 mkdir -p kernel_workspace && cd kernel_workspace
 
-echo "🌐 正在初始化 oneplus/${CPU} 分支、机型 ${FEIL} 的 manifest..."
-repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${CPU} -m ${FEIL}.xml --depth=1
-
+# 适配真我机型源码仓库，切换为realme对应CPU分支
+echo "🌐 正在初始化 realme/${CPU} 分支、机型 ${FEIL} 的 manifest..."
+repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/realme/${CPU} -m ${FEIL}.xml --depth=1
 echo "🔄 正在同步内核源码仓库 (使用 $(nproc --all) 线程)..."
 repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync
 echo "✅ 内核源码同步完成"
@@ -112,7 +111,6 @@ export adv=$ANDROID_VERSION
 echo "🔧 正在清理并修改版本字符串..."
 rm -f kernel_platform/common/android/abi_gki_protected_exports_* || echo "common 目录下无受保护导出表，无需删除"
 rm -f kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "msm-kernel 目录下无受保护导出表，无需删除"
-
 sed -i 's/ -dirty//g' kernel_platform/common/scripts/setlocalversion
 sed -i 's/ -dirty//g' kernel_platform/msm-kernel/scripts/setlocalversion
 sed -i 's/ -dirty//g' kernel_platform/external/dtc/scripts/setlocalversion
@@ -130,7 +128,6 @@ else
   sed -i 's/\${scm_version}//' kernel_platform/common/scripts/setlocalversion
   sed -i 's/\${scm_version}//' kernel_platform/msm-kernel/scripts/setlocalversion
 fi
-
 echo "✅ 内核仓库准备完毕并完成版本号清理"
 
 if [ "$bbg" = "On" ] && [ "$KPM" = "Off" ]; then
@@ -146,11 +143,9 @@ fi
 echo "⚡ 正在配置 ReSukiSU..."
 cd kernel_platform
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-
 cd KernelSU
 KSU_VERSION_COUNT=$(git rev-list --count main)
 export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
-
 echo "✅ ReSukiSU 配置完成"
 cd ../..
 
@@ -160,10 +155,9 @@ if [ "$SUSFS" = "On" ]; then
 fi
 git clone https://github.com/Xiaomichael/kernel_patches.git
 git clone https://github.com/ShirkNeko/SukiSU_patch.git
-
 cd kernel_platform
-echo "📝 正在复制补丁文件..."
 
+echo "📝 正在复制补丁文件..."
 if [ "$SUSFS" = "On" ]; then
     cp ../susfs4oki/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
     cp ../susfs4oki/kernel_patches/fs/* ./common/fs/
@@ -194,7 +188,6 @@ fi
 
 echo "🔧 正在应用补丁..."
 cd ./common
-
 if [ "$UNICODE_BYPASS" = "On" ]; then
   echo "📦 正在应用Unicode零宽绕过修复补丁..."
   patch -p1 < unicode_bypass_fix.patch
@@ -228,19 +221,30 @@ fi
 echo "✅ 所有补丁应用完成"
 cd ../..
 
+# 适配真我全机型风驰补丁，覆盖高通/联发科主流机型
 if [ "$KERNEL_VERSION" = "6.6" ]; then
   cd kernel_platform/common
   echo "⬇️ 正在拉取风驰补丁"
-  if [ "$FEIL" = "oneplus_ace5_ultra" ] || [ "$FEIL" = "oneplus_ace5_ultra_b" ]; then
-      echo "⚠️ Ace5 Ultra 需要使用 mt6991 分支的补丁"
+  # 真我联发科机型适配
+  if [[ "$FEIL" =~ "realme_gt5_pro" || "$FEIL" =~ "realme_13_pro" || "$CPU" = "mt6990" ]]; then
+      echo "⚠️ 真我天玑9300机型，使用 mt6990 分支的补丁"
+      git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6990"
+  elif [[ "$FEIL" =~ "realme_gt7" || "$CPU" = "mt6991" ]]; then
+      echo "⚠️ 真我天玑9400机型，使用 mt6991 分支的补丁"
       git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
-  else
-      echo "⚙️ 使用 sm8750 分支的补丁"
+  # 真我高通机型适配
+  elif [[ "$FEIL" =~ "realme_gt6" || "$CPU" = "sm8650" ]]; then
+      echo "⚙️ 真我骁龙8Gen3机型，使用 sm8650 分支的补丁"
+      git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8650"
+  elif [[ "$FEIL" =~ "realme_gt7_pro" || "$CPU" = "sm8750" ]]; then
+      echo "⚙️ 真我骁龙8Gen4机型，使用 sm8750 分支的补丁"
       git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"
+  else
+      echo "⚙️ 使用通用 sm8650 分支的补丁"
+      git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8650"
   fi
 
   cp ./SCHED_PATCH/fengchi_$FEIL.patch ./
-
   if [[ -f "fengchi_$FEIL.patch" ]]; then
     echo "⚙️ 开始应用风驰补丁"
     dos2unix "fengchi_$FEIL.patch"
@@ -259,7 +263,6 @@ fi
 
 echo "⚙️ 正在配置内核编译选项..."
 DEFCONFIG_PATH="$WORKSPACE/kernel_workspace/kernel_platform/common/arch/arm64/configs/gki_defconfig"
-
 echo "CONFIG_KSU=y" >> "$DEFCONFIG_PATH"
 echo "CONFIG_KSU_FULL_NAME_FORMAT=\"%TAG_NAME%-%COMMIT_SHA%-xiaoxiaow@ReSukiSU\"" >> "$DEFCONFIG_PATH"
 echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> "$DEFCONFIG_PATH"
@@ -286,7 +289,7 @@ CONFIG_KSU_MANUAL_HOOK=y
 EOT
 fi
 
-#添加对 Mountify (backslashxx/mountify) 模块的支持
+# 添加对 Mountify 模块的支持
 echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG_PATH"
 echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG_PATH"
 
@@ -363,17 +366,15 @@ if [ "$KERNEL_VERSION" = "5.10" ] || [ "$KERNEL_VERSION" = "5.15" ]; then
 fi
 
 echo "CONFIG_HEADERS_INSTALL=n" >> "$DEFCONFIG_PATH"
-
 sed -i 's/check_defconfig//' "$WORKSPACE/kernel_workspace/kernel_platform/common/build.config.gki"
-
 echo "✅ defconfig 配置更新完成"
 cd ../..
 
 echo "🔨 开始内核编译..."
 cd "$WORKSPACE/kernel_workspace/kernel_platform/common"
-
 MAKE_CMD_COMMON="make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=\"ccache clang\" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all"
 
+# 适配真我机型不同内核版本的编译工具链
 if [ "$KERNEL_VERSION" = "6.1" ]; then
     export KBUILD_BUILD_TIMESTAMP="Tue Dec 12 12:32:56 UTC 2025"
     export KBUILD_BUILD_VERSION=1
@@ -401,10 +402,8 @@ cd "$WORKSPACE"
 echo "📦 正在获取 AnyKernel3 并准备打包..."
 git clone https://github.com/Xiaomichael/AnyKernel3 --depth=1
 rm -rf ./AnyKernel3/.git
-
 IMAGE_PATH=$(find "$WORKSPACE/kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
 if [ -z "$IMAGE_PATH" ]; then echo "❌ 严重错误：编译完成后未找到 Kernel Image！" && exit 1; fi
-
 echo "✅ 已找到 Kernel Image: $IMAGE_PATH"
 cp "$IMAGE_PATH" ./AnyKernel3/Image
 
@@ -420,6 +419,7 @@ if [ "$KPM" = 'On' ]; then
     echo "✅ KPM 补丁应用完成"
 fi
 
+# 适配真我机型安装包命名
 if [ "$lz4kd" = "On" ]; then
   ARTIFACT_NAME="${FEIL}_ReSukiSU_lz4kd_${KSUVER}"
 elif [ "$KERNEL_VERSION" = "6.1" ]; then
@@ -429,10 +429,10 @@ elif [ "$KERNEL_VERSION" = "6.6" ]; then
 else
   ARTIFACT_NAME="${FEIL}_ReSukiSU_${KSUVER}"
 fi
+
 if [ "$SUSFS" = "On" ]; then
   ARTIFACT_NAME="${ARTIFACT_NAME}_SUSFS"
 fi
-
 FINAL_ZIP_NAME="${ARTIFACT_NAME}.zip"
 
 echo "📦 正在创建最终可刷入压缩包: ${FINAL_ZIP_NAME}..."
@@ -443,12 +443,10 @@ echo "================================================="
 echo "                  构建完成！"
 echo "================================================="
 echo "-> 可刷入内核压缩包路径: $WORKSPACE/${FINAL_ZIP_NAME}"
-
 ZRAM_KO_PATH=$(find "$WORKSPACE/kernel_workspace/kernel_platform/common/out/" -name "zram.ko" | head -n 1)
 if [ -n "$ZRAM_KO_PATH" ]; then
     cp "$ZRAM_KO_PATH" "$WORKSPACE/"
     echo "-> zram.ko 模块路径: $WORKSPACE/zram.ko"
 fi
-
 echo "================================================="
 echo ""

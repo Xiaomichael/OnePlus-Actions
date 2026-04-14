@@ -146,6 +146,15 @@ on:
           - 'On'
           - 'Off'
         default: 'Off'
+
+      GUNYAH_FIX:
+        description: "是否添加 Gunyah修复补丁(仅6.1内核生效)"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'Off'
          
 jobs:
   build:
@@ -333,6 +342,11 @@ jobs:
               cp ../kernel_patches/common/unicode_bypass_fix_6.1-.patch ./common/unicode_bypass_fix.patch
             fi
           fi
+
+          if [ "${{ github.event.inputs.GUNYAH_FIX }}" = "On" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
+            cp ../kernel_patches/common/gunyah_large_memory_access_fix.patch ./common/
+            cp ../kernel_patches/common/gunyah_scm_vmid_fix.patch ./common/
+          fi
           
           if [ "${{ github.event.inputs.lz4kd }}" == "On" ]; then
             # Copy lz4k from ShirkNeko
@@ -347,6 +361,12 @@ jobs:
           if [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ]; then
             echo "📦 正在应用Unicode零宽绕过修复补丁..."
             patch -p1 < unicode_bypass_fix.patch
+          fi
+
+          if [ "${{ github.event.inputs.GUNYAH_FIX }}" = "On" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
+            echo "📦 正在应用 Gunyah 修复补丁..."
+            patch -p1 < gunyah_large_memory_access_fix.patch
+            patch -p1 < gunyah_scm_vmid_fix.patch
           fi
 
           if [ "${{ github.event.inputs.lz4kd }}" = "Off" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then

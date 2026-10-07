@@ -1,0 +1,606 @@
+name: call-build-bakasu-ci
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_call:
+    inputs:
+      CPU:
+        required: true
+        type: string
+      FEIL:
+        required: true
+        type: string
+      ANDROID_VERSION:
+        required: true
+        type: string
+      KERNEL_VERSION:
+        required: true
+        type: string
+      SUSFS:
+        required: true
+        type: string
+      lz4kd:
+        required: true
+        type: string
+      bbr:
+        required: true
+        type: string
+      bbg:
+        required: true
+        type: string
+      proxy:
+        required: true
+        type: string
+      UNICODE_BYPASS:
+        required: true
+        type: string
+         
+jobs:
+  build:
+    name: For ${{ inputs.FEIL }} KPM ${{ inputs.KPM }} lz4kd ${{ inputs.lz4kd }} SUSFS ${{ inputs.SUSFS }}
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_MAXSIZE: 8G
+      
+    steps:
+      - name: "🚀 Maximize Build Space | 最大化构建空间"
+        if: ${{ inputs.KERNEL_VERSION == '5.10' || inputs.KERNEL_VERSION == '5.15' }}
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: "📥 Checkout Builder | 检出构建脚本"
+        uses: actions/checkout@v4
+
+      - name: "⚙️ Setup Cache Env | 设置缓存环境"
+        run: |
+          echo "🔧 正在设置机型隔离缓存目录..."
+          echo "CCACHE_DIR=$HOME/.ccache_${{ inputs.FEIL }}_BakaSU" >> $GITHUB_ENV
+          mkdir -p "$HOME/.ccache_${{ inputs.FEIL }}_BakaSU"
+          echo "✅ 缓存目录已设置: $HOME/.ccache_${{ inputs.FEIL }}_BakaSU"
+
+      - name: "🔐 Configure Git | 配置Git账户"
+        run: |
+          echo "🔧 正在配置Git用户信息..."
+          git config --global user.name "build"
+          git config --global user.email "2210077278@qq.com"
+          echo "✅ Git配置完成"
+
+      - name: "📦 Cache & Install Dependencies | 缓存 & 安装构建依赖"
+        uses: awalsh128/cache-apt-pkgs-action@latest 
+        with: 
+          packages: python3 git curl ccache libelf-dev build-essential flex bison libssl-dev libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk dos2unix
+          execute_install_scripts: true
+
+      - name: "💾 Restore ccache (With SUSFS) | 恢复ccache缓存 (With SUSFS)"
+        if: ${{ inputs.SUSFS == 'On' }}
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ inputs.FEIL }}-BakaSU-SUSFS
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ inputs.FEIL }}-BakaSU-SUSFS
+            ccache-${{ runner.os }}-BakaSU-SUSFS
+
+      - name: "💾 Restore ccache (Without SUSFS) | 恢复ccache缓存 (Without SUSFS)"
+        if: ${{ inputs.SUSFS == 'Off' }}
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ inputs.FEIL }}-BakaSU-NoSUSFS
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ inputs.FEIL }}-BakaSU-NoSUSFS
+            ccache-${{ runner.os }}-BakaSU-NoSUSFS
+
+      - name: "⚙️ Initialize ccache | 初始化ccache"
+        run: |
+          echo "🔧 正在初始化ccache..."
+          INIT_FLAG="${{ env.CCACHE_DIR }}/.ccache_initialized"
+          
+          if command -v ccache >/dev/null 2>&1; then
+            if [ ! -f "$INIT_FLAG" ]; then
+              mkdir -p "${{ env.CCACHE_DIR }}"
+              ccache -M ${{ env.CCACHE_MAXSIZE }}
+              touch "$INIT_FLAG"
+              echo "✅ ccache初始化完成"
+            else
+              echo "ℹ️ ccache已存在，跳过初始化"
+            fi
+          else
+            echo "⚠️ 未找到ccache命令，跳过初始化"
+          fi
+          # 显示缓存统计
+          ccache -s
+          echo "✅ ccache初始化流程完成"
+
+      - name: "📥 Install Repo Tool | 安装Repo工具"
+        run: |
+          echo "⬇️ 正在下载repo工具..."
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+          chmod a+x ~/repo
+          sudo mv ~/repo /usr/local/bin/repo
+          echo "✅ repo工具安装完成"
+
+      - name: "⬇️ Clone Kernel Source | 克隆内核源码"
+        run: |
+          mkdir kernel_workspace && cd kernel_workspace
+
+          echo "🌐 正在初始化内核仓库..."
+          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ inputs.CPU }} -m ${{ inputs.FEIL }}.xml --depth=1
+
+          echo "🔄 同步代码库(使用$(nproc --all)线程)..."
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync
+ 
+          echo "✅ 内核源码克隆完成"
+     
+          rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
+          rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
+
+          echo "🔧 正在配置内核版本信息..."
+          # Remove -dirty in kernel version
+          sed -i 's/ -dirty//g' kernel_platform/common/scripts/setlocalversion
+          sed -i 's/ -dirty//g' kernel_platform/msm-kernel/scripts/setlocalversion
+          sed -i 's/ -dirty//g' kernel_platform/external/dtc/scripts/setlocalversion
+          sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/common/scripts/setlocalversion
+          sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/msm-kernel/scripts/setlocalversion
+          sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' kernel_platform/external/dtc/scripts/setlocalversion
+          
+          if [ "${{ inputs.KERNEL_VERSION }}" != "6.6" ]; then
+            sed -i '$s|echo "\$res"|echo "-${{ inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/common/scripts/setlocalversion            
+            sed -i '$s|echo "\$res"|echo "-${{ inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/msm-kernel/scripts/setlocalversion
+            sed -i '$s|echo "\$res"|echo "-${{ inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
+          else
+            ESCAPED_SUFFIX=$(printf '%s\n' "-${{ inputs.ANDROID_VERSION }}-oki-xiaoxiaow" | sed 's:[\/&]:\\&:g')
+            sudo sed -i "s/-4k/$ESCAPED_SUFFIX/g" kernel_platform/common/arch/arm64/configs/gki_defconfig
+            sed -i 's/${scm_version}//' kernel_platform/common/scripts/setlocalversion
+            sed -i 's/${scm_version}//' kernel_platform/msm-kernel/scripts/setlocalversion
+          fi
+
+          echo "✅ 内核配置完成"
+
+      - name: "⚡ Setup Baseband-guard | 配置 Baseband-guard"
+        if: ${{ inputs.bbg == 'On' && inputs.KPM == 'Off' }}
+        run: |
+          set -e
+          cd kernel_workspace/kernel_platform/common
+          echo "🛠️ 正在设置BBG..."
+          curl -sSL https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh -o setup.sh
+          bash setup.sh     
+              
+      - name: "⚡ Setup BakaSU | 配置 BakaSU"
+        run: |
+          cd kernel_workspace/kernel_platform
+
+          # 下载并执行设置脚本
+          echo "🛠️ 正在设置BakaSU..."
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
+
+          cd KernelSU
+          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 30700)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+
+          echo "✅ BakaSU 配置完成"
+          
+      - name: "🔧 Setup Patches | 配置补丁"
+        run: |
+          cd kernel_workspace
+
+          echo "⬇️ 克隆所需补丁..."
+          if [ "${{ inputs.SUSFS }}" == "On" ]; then          
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ inputs.ANDROID_VERSION }}-${{ inputs.KERNEL_VERSION }}
+          fi
+          git clone https://github.com/Xiaomichael/kernel_patches.git
+          git clone https://github.com/ShirkNeko/SukiSU_patch.git
+          
+          cd kernel_platform
+          echo "📝 复制补丁文件..."
+          if [ "${{ inputs.SUSFS }}" == "On" ]; then
+            cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.ANDROID_VERSION }}-${{ inputs.KERNEL_VERSION }}.patch ./common/
+            cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+            cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          else
+            cp ../kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
+          fi
+          cp ../kernel_patches/zram_patches/001-lz4.patch ./common/
+          cp ../kernel_patches/zram_patches/lz4armv8.S ./common/lib
+          cp ../kernel_patches/zram_patches/002-zstd.patch ./common/
+          if [ "${{ inputs.UNICODE_BYPASS }}" = "On" ]; then
+            if [ "${{ inputs.KERNEL_VERSION }}" = "6.1" ] || [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+              cp ../kernel_patches/common/unicode_bypass_fix_6.1+.patch ./common/unicode_bypass_fix.patch
+            elif [ "${{ inputs.KERNEL_VERSION }}" = "5.15" ] || [ "${{ inputs.KERNEL_VERSION }}" = "5.10" ]; then
+              cp ../kernel_patches/common/unicode_bypass_fix_6.1-.patch ./common/unicode_bypass_fix.patch
+            fi
+          fi
+
+          if [ "${{ inputs.lz4kd }}" == "On" ]; then
+            # Copy lz4k from ShirkNeko
+            cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./common/include/linux
+            cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./common/lib
+            cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./common/crypto
+            cp -r ../SukiSU_patch/other/zram/lz4k_oplus ./common/lib/
+          fi
+          
+          cd ./common
+
+          if [ "${{ inputs.UNICODE_BYPASS }}" = "On" ]; then
+            echo "📦 正在应用Unicode零宽绕过修复补丁..."
+            patch -p1 < unicode_bypass_fix.patch
+          fi
+
+          if [ "${{ inputs.lz4kd }}" = "Off" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.1" ]; then
+            echo "📦 应用lz4补丁..."
+            git apply -p1 < 001-lz4.patch || true
+            # patch -p1 < 002-zstd.patch || true
+          fi
+
+          if [ "${{ inputs.lz4kd }}" = "Off" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+            echo "📦 应用lz4补丁..."
+            git apply -p1 < 001-lz4.patch || true
+          fi
+          
+          if [ "${{ inputs.lz4kd }}" == "On" ]; then
+            echo "📦 应用lz4kd补丁..."
+            cp ../../SukiSU_patch/other/zram/zram_patch/${{ inputs.KERNEL_VERSION }}/lz4kd.patch ./
+            patch -p1 -F 3 < lz4kd.patch || true
+            cp ../../SukiSU_patch/other/zram/zram_patch/${{ inputs.KERNEL_VERSION }}/lz4k_oplus.patch ./
+            patch -p1 -F 3 < lz4k_oplus.patch || true
+          fi
+
+          if [ "${{ inputs.SUSFS }}" == "On" ]; then
+            echo "📦 应用SUSFS补丁..."
+            fake_patched=0
+            fake_patched_expand=0
+            if [ "${{ inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+              if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+                echo "nr_subpages Line not found. Fake Patching!"
+                sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+                fake_patched=1
+              fi
+              
+              if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+                echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+              fi
+              
+              if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+                echo "#include <linux/zswap.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/sched\/sysctl.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+              fi
+              
+              if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+                echo "Temporarily expand the `last_vma_end` `if` block to fix a matching issue."
+                perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+                fake_patched_expand=1
+              fi
+            fi
+            if [ "${{ inputs.ANDROID_VERSION }}" = "android12" ] && [ "${{ inputs.KERNEL_VERSION }}" = "5.10" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+            fi
+            if [ "${{ inputs.ANDROID_VERSION }}" = "android13" ] && [ "${{ inputs.KERNEL_VERSION }}" = "5.15" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+              
+              if grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+                echo "#include swap_slots.h> Line found. Deleting header."
+                sed -i '/#include <linux\/swap_slots.h>/d' ./mm/memory.c
+                fake_patched=1
+              fi
+            fi
+            
+            if [ "${{ inputs.ANDROID_VERSION }}" = "android14" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.1" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+              
+              if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+                echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+              fi
+            fi
+            
+            patch -p1 < 50_add_susfs_in_gki-${{ inputs.ANDROID_VERSION }}-${{ inputs.KERNEL_VERSION }}.patch || true
+            
+            # Revert Fake kernel patch
+            if [ "$fake_patched_expand" = 1 ]; then
+              if [ "${{ inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+                if grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+                  perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\) \{\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t\}/\t\t\tif (vma->vm_end > last_vma_end)\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);/' ./fs/proc/task_mmu.c
+                fi
+              fi
+            fi
+            
+            if [ "$fake_patched" = 1 ]; then
+              if [ "${{ inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+                if grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+                  echo "nr_subpages Line found. Revert Fake Patching!"
+                  sed -i -e '/unsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;/d' -e '/pagemap_entry_t \*res = NULL;/d' ./fs/proc/task_mmu.c
+                fi
+              fi
+              if [ "${{ inputs.ANDROID_VERSION }}" = "android12" ] && [ "${{ inputs.KERNEL_VERSION }}" = "5.10" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+              fi
+              if [ "${{ inputs.ANDROID_VERSION }}" = "android13" ] && [ "${{ inputs.KERNEL_VERSION }}" = "5.15" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+                
+                if ! grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+                  echo "#include <linux/swap_slots.h> Line not found. Adding missing header"
+                  sed -i '/#include <linux\/vmalloc.h>/a #include <linux\/swap_slots.h>' ./mm/memory.c
+                fi
+              fi
+              if [ "${{ inputs.ANDROID_VERSION }}" = "android14" ] && [ "${{ inputs.KERNEL_VERSION }}" = "6.1" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+              fi
+            fi
+            echo "✅ SUSFS patches applied"
+          else
+            echo "📦 应用MANUAL_HOOK补丁..."
+            patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
+          fi
+
+          echo "✅ 所有补丁应用完成"
+
+      - name: "⚙️ Apply SCHED Patch | 应用风驰补丁"
+        if: ${{ inputs.KERNEL_VERSION == '6.6' }}
+        run: |
+          cd kernel_workspace/kernel_platform/common
+
+          echo "⬇️ 正在拉取风驰补丁"
+          if [ "${{ inputs.FEIL }}" == "oneplus_ace5_ultra" ] || [ "${{ inputs.FEIL }}" = "oneplus_ace5_ultra_b" ]; then
+              echo "⚠️ Ace5 Ultra 需要使用 mt6991 分支的补丁"
+              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
+          else
+              echo "⚙️ 使用 sm8750 分支的补丁"
+              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"
+          fi
+
+          cp ./SCHED_PATCH/fengchi_${{ inputs.FEIL }}.patch ./
+
+          if [[ -f "fengchi_${{ inputs.FEIL }}.patch" ]]; then
+            echo "⚙️ 开始应用风驰补丁"
+            dos2unix "fengchi_${{ inputs.FEIL }}.patch"
+            patch -p1 -F 3 < "fengchi_${{ inputs.FEIL }}.patch"
+            echo "✅ 完美风驰补丁应用完成"
+          else
+            sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
+            wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
+            echo "⚙️ 正在打OGKI转换GKI补丁"
+            patch -p1 -F 3 < hmbird_patch.patch
+            echo "✅ OGKI转换GKI_patch完成"
+          fi
+          
+      - name: "⚙️ Configure Kernel Options | 配置内核选项"
+        run: |
+          cd kernel_workspace/kernel_platform
+
+          echo "⚙️ 正在配置内核编译选项..."
+          
+          echo "📦 启用 KSU 支持..."
+          curl -L -o BakaSU_setup.bin https://github.com/Xiaomichael/OnePlus-Actions/raw/Build/script/bakasu_setup.bin
+          chmod +x BakaSU_setup.bin
+          ./BakaSU_setup.bin
+          rm -rf ./BakaSU_setup.bin
+          
+          if [ "${{ inputs.SUSFS }}" == "On" ]; then
+            echo "📦 启用 SUSFS 功能..."
+            echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          else 
+            echo "📦 启用 MANUAL_HOOK..."
+            echo "CONFIG_KSU_SUSFS=n" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+
+          echo "⚡ 添加对 Mountify 的支持"
+          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
+
+          if [ "${{ inputs.bbg }}" == "On" ] && [ "${{ inputs.KPM }}" == "Off" ]; then
+            echo "⚡ 配置 BBG 中..."
+            echo 'CONFIG_BBG=y' >> ./common/arch/arm64/configs/gki_defconfig
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./common/arch/arm64/configs/gki_defconfig
+          fi          
+          
+          if [ "${{ inputs.bbr }}" == "On" ]; then
+            echo "🌐 启用 BBR 网络算法..."
+            echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+          
+          if [ "${{ inputs.lz4kd }}" == "On" ]; then
+            echo "📦 启用 lz4kd压缩..."
+            echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_CRYPTO_LZ4K_OPLUS=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_ZRAM_WRITEBACK=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+          
+          if [ "${{ inputs.KERNEL_VERSION }}" == "6.1" ] || [ "${{ inputs.KERNEL_VERSION }}" == "6.6" ]; then
+            echo "📦 为6.1 / 6.6加入O2优化..."
+            echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+
+          if [ "${{ inputs.proxy }}" == "On" ]; then
+            echo "📦 加入代理优化..."
+            echo "CONFIG_BPF_STREAM_PARSER=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_NETFILTER_XT_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_MAX=65534" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_BITMAP_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_MAC=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_NET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_NETNET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_LIST_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+          
+          if [ "${{ inputs.KERNEL_VERSION }}" = "5.10" ] || [ "${{ inputs.KERNEL_VERSION }}" = "5.15" ]; then
+            echo "📦 正在为5.10 / 5.15系配置lto中..."
+            DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
+            sed -i 's/^CONFIG_LTO=n/CONFIG_LTO=y/' "$DEFCONFIG"
+            sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_THIN=y/' "$DEFCONFIG"
+            sed -i 's/^CONFIG_LTO_CLANG_NONE=y/CONFIG_LTO_CLANG_THIN=y/' "$DEFCONFIG"
+            grep -q '^CONFIG_LTO_CLANG_THIN=y' "$DEFCONFIG" || echo 'CONFIG_LTO_CLANG_THIN=y' >> "$DEFCONFIG"
+          fi
+
+          # 跳过将uapi标准头安装到 usr/include 目录的不必要操作，节省编译时间
+          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+
+          echo "⚡ Remove check_defconfig"
+          sed -i 's/check_defconfig//' ./common/build.config.gki
+          echo "✅ 内核配置更新完成"
+          
+      - name: "🔨 Build Kernel | 编译内核 (Clang)"
+        run: |
+          echo "🏗️ 开始内核编译..."
+          export KBUILD_BUILD_USER="xiaoxiaow"
+          export KBUILD_BUILD_HOST="xiaoxiaow_build"
+
+          if [ "${{ inputs.KERNEL_VERSION }}" == "6.1" ]; then
+            export KBUILD_BUILD_TIMESTAMP="Tue Mar 10 03:53:33 UTC 2026"
+            export KBUILD_BUILD_VERSION=1
+            export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH"
+            export PATH="/usr/lib/ccache:$PATH"
+            sudo apt install libelf-dev
+            cd kernel_workspace/kernel_platform/common
+            make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-O2 gki_defconfig all
+
+          elif [ "${{ inputs.KERNEL_VERSION }}" == "6.6" ]; then
+            export PATH="/usr/lib/ccache:$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH" 
+            export PATH="/usr/lib/ccache:$PATH"
+            sudo apt install libelf-dev
+            cd kernel_workspace/kernel_platform/common
+            make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-O2  gki_defconfig all
+            
+          elif [ "${{ inputs.KERNEL_VERSION }}" == "5.15" ]; then
+            export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
+            export PATH="/usr/lib/ccache:$PATH"
+            sudo apt install libelf-dev
+            cd kernel_workspace/kernel_platform/common
+            make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all
+            
+          elif [ "${{ inputs.KERNEL_VERSION }}" == "5.10" ]; then
+            export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+            export PATH="/usr/lib/ccache:$PATH"
+            sudo apt install libelf-dev
+            cd kernel_workspace/kernel_platform/common
+            make -j$(nproc --all) LLVM_IAS=1 LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all
+          fi
+          
+          ccache -s
+          echo "✅ 内核编译完成"
+
+      - name: "📦 Package Kernel | 打包内核"
+        run: |
+          echo "📦 准备AnyKernel3打包环境..."
+          git clone https://github.com/Xiaomichael/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          mkdir -p kernel_workspace/kernel_platform/out/Final-Image-Find/
+          image_path=""
+          if [ -d "./kernel_workspace/kernel_platform/common/out/" ]; then
+            image_path=$(find "./kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
+            if [ -n "$image_path" ]; then
+              echo "✅ 使用 make 编译的统一路径，成功找到 Image 文件"
+            fi
+          fi
+          if [ -z "$image_path" ] && [ -d "./kernel_workspace/kernel_platform/out/" ]; then
+            image_path=$(find "./kernel_workspace/kernel_platform/out/" -name "Image" | head -n 1)
+            if [ -n "$image_path" ]; then
+              echo "✅ 使用官方脚本编译，成功找到 Image 文件"
+            fi
+          fi
+          if [ -z "$image_path" ]; then
+            echo "❌ 未找到 Image 文件，构建失败" >&2
+            exit 1
+          fi
+          if [ -f "$image_path" ]; then
+            echo "✅ Image file finally located at: $image_path"
+            cp "$image_path" ./AnyKernel3/Image
+            cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
+          fi
+
+      - name: "🧠 Set Artifact Name | 设置产物名称"
+        id: set_name
+        run: |
+          if [ "${{ inputs.lz4kd }}" = "On" ]; then
+            BASE_NAME="${{ inputs.FEIL }}_BakaSU_lz4kd_${{ env.KSUVER }}"
+          elif [ "${{ inputs.KERNEL_VERSION }}" = "6.1" ]; then
+            BASE_NAME="${{ inputs.FEIL }}_BakaSU_lz4_zstd_${{ env.KSUVER }}"
+          elif [ "${{ inputs.KERNEL_VERSION }}" = "6.6" ]; then
+            BASE_NAME="${{ inputs.FEIL }}_BakaSU_lz4_${{ env.KSUVER }}"
+          else
+            BASE_NAME="${{ inputs.FEIL }}_BakaSU_${{ env.KSUVER }}"
+          fi
+          
+          if [ "${{ inputs.SUSFS }}" = "On" ]; then
+            FINAL_NAME="${BASE_NAME}_SUSFS"
+          else
+            FINAL_NAME="${BASE_NAME}"
+          fi
+          
+          echo "ARTIFACT_NAME=${FINAL_NAME}" >> $GITHUB_OUTPUT
+
+      - name: "📤 Upload AnyKernel3 | 上传 AnyKernel3"
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}
+          path: ./AnyKernel3/*
+         
+      - name: "📝 Find zram.ko & crypto_zstdn.ko | 查找 zram.ko & crypto_zstdn.ko"
+        run: |
+          find -name zram.ko
+          find -name crypto_zstdn.ko
+          
+      - name: "📤 Upload zram.ko | 上传 zram.ko"
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.FEIL }}_zram.ko
+          path: ./kernel_workspace/kernel_platform/common/out/drivers/block/zram/zram.ko

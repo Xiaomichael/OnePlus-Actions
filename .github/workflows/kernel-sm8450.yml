@@ -45,7 +45,7 @@ jobs:
         include:
         - FEIL: 'oneplus_10_pro_b'
         
-    uses: ./.github/workflows/Call_Build_ReSukiSU.yml
+    uses: ./.github/workflows/Call_Build_BakaSU.yml
     secrets: inherit
     with:
       CPU: ${{ inputs.CPU }}

@@ -171,7 +171,7 @@ if [ "$SUSFS" = "On" ]; then
   cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
   cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
 else
-  cp ../kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
+  echo "📦 使用Tracepoint Syscall Redirect Hook, 跳过复制..."
 fi
 
 cp ../kernel_patches/zram_patches/001-lz4.patch ./common/
@@ -310,8 +310,7 @@ if [ "$SUSFS" = "On" ]; then
   fi
   echo "✅ SUSFS patches applied"
 else
-  echo "📦 应用 MANUAL_HOOK 补丁..."
-  patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
+  echo "📦 使用Tracepoint Syscall Redirect Hook..."
 fi
 
 if [ "$lz4kd" = "Off" ] && [ "$KERNEL_VERSION" = "6.1" ]; then
@@ -386,10 +385,8 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
 EOT
 else
-    echo "📦 启用 MANUAL_HOOK..."
-    cat <<EOT >> "$DEFCONFIG_PATH"
-CONFIG_KSU_SUSFS=n
-CONFIG_KSU_MANUAL_HOOK=y
+  echo "📦 使用 Tracepoint Syscall Redirect Hook..."
+  echo "CONFIG_KSU_SUSFS=n" >> "$DEFCONFIG_PATH"
 EOT
 fi
 

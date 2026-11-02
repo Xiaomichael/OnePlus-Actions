@@ -337,7 +337,7 @@ jobs:
             cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
           else
-            cp ../kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
+            echo "📦 使用Tracepoint Syscall Redirect Hook, 跳过复制..."
           fi
           cp ../kernel_patches/zram_patches/001-lz4.patch ./common/
           cp ../kernel_patches/zram_patches/lz4armv8.S ./common/lib
@@ -493,8 +493,7 @@ jobs:
             fi
             echo "✅ SUSFS patches applied"
           else
-            echo "📦 应用MANUAL_HOOK补丁..."
-            patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
+            echo "📦 使用Tracepoint Syscall Redirect Hook..."
           fi
 
           echo "✅ 所有补丁应用完成"
@@ -553,9 +552,8 @@ jobs:
             echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
           else 
-            echo "📦 启用 MANUAL_HOOK..."
+            echo "📦 使用 Tracepoint Syscall Redirect Hook..."
             echo "CONFIG_KSU_SUSFS=n" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
 
           echo "⚡ 添加对 Mountify 的支持"

@@ -35,6 +35,7 @@ on:
           - 'oneplus_ace_6'
           - 'oneplus_pad_2_pro_b'
           - 'oneplus_pad_3_b'
+          - 'oneplus_pad_pro_b'
           - 'oneplus_ace5_ultra_b'
           - 'oneplus_nord_6'
           - 'oneplus_turbo_6'
@@ -156,10 +157,31 @@ on:
           - 'On'
           - 'Off'
         default: 'Off'
+
+      # ↓↓↓ P2-6：上游全部浮动 ref，pin 死后可复现；留空则用分支 HEAD（不推荐）
+      BAKASU_REF:
+        description: "BakaSU 分支或 commit(建议pin死, 如 abc1234)"
+        required: false
+        default: "main"
+
+      SUSFS_COMMIT:
+        description: "susfs4ksu commit(留空=用 gki-ANDROID-KERNEL 分支HEAD; 建议pin死)"
+        required: false
+        default: ""
+
+      SCHED_REF:
+        description: "SCHED_PATCH(风驰) 分支或commit"
+        required: false
+        default: "auto"
+
+      CPU_OVERRIDE:
+        description: "【一般留空】强制指定CPU分支; 留空=由机型自动推导(P0-1修复)"
+        required: false
+        default: ""
          
 jobs:
   build:
-    name: For ${{ github.event.inputs.FEIL }} KPM ${{ github.event.inputs.KPM }} lz4kd ${{ github.event.inputs.lz4kd }} SUSFS ${{ github.event.inputs.SUSFS }}
+    name: ${{ github.event.inputs.FEIL }} | ${{ github.event.inputs.CPU }} | ${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} | SUSFS ${{ github.event.inputs.SUSFS }} | lz4kd ${{ github.event.inputs.lz4kd }} | BBG ${{ github.event.inputs.bbg }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
@@ -168,26 +190,144 @@ jobs:
       CCACHE_MAXSIZE: 8G
       
     steps:
-      - name: "🚀 Maximize Build Space | 最大化构建空间"
-        if: ${{ github.event.inputs.KERNEL_VERSION == '5.10' || github.event.inputs.KERNEL_VERSION == '5.15' }}
-        uses: easimon/maximize-build-space@master
+      # P2-2: 分支引用@master 已钉 SHA，请在首次运行前用 scripts/pin_actions.sh 生成真实值替换
+      - name: "🚀 Maximize Build Space | 最大化构建空间 (P2-3: 无条件+加swap)"
+        uses: easimon/maximize-build-space@PINNED_SHA_PLACEHOLDER # master
         with:
-          root-reserve-mb: 8192
+          root-reserve-mb: 30720          # 6.6+SUSFS+lz4kd 的 out/ 可涨到 20G+，原 8192 会 No space
+          swap-size-mb: 8192              # 防 ld.lld 被 OOM-kill(signal 9)，16G 内存编 6.6 真会 OOM
           temp-reserve-mb: 4096
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
+          remove-docker-images: 'true'
 
       - name: "📥 Checkout Builder | 检出构建脚本"
-        uses: actions/checkout@v4
+        uses: actions/checkout@PINNED_SHA_PLACEHOLDER # v4
 
-      - name: "⚙️ Setup Cache Env | 设置缓存环境"
+      # ══════════ P0-1 / P0-3：CPU×机型×KMI 组合校验，30秒拦住"选错下拉框白等40分钟" ══════════
+      - name: "✅ Validate Matrix | 校验 机型/CPU/KMI 组合合法性"
         run: |
-          echo "🔧 正在设置机型隔离缓存目录..."
-          echo "CCACHE_DIR=$HOME/.ccache_${{ github.event.inputs.FEIL }}_BakaSU" >> $GITHUB_ENV
-          mkdir -p "$HOME/.ccache_${{ github.event.inputs.FEIL }}_BakaSU"
-          echo "✅ 缓存目录已设置: $HOME/.ccache_${{ github.event.inputs.FEIL }}_BakaSU"
+          set -euo pipefail
+          DEV="${{ github.event.inputs.FEIL }}"
+          CPU_IN="${{ github.event.inputs.CPU }}"
+          KV="${{ github.event.inputs.KERNEL_VERSION }}"
+          AV="${{ github.event.inputs.ANDROID_VERSION }}"
+
+          # ←←← 由 scripts/gen_cpu_map.sh 从 kernel_manifest 真实分支自动生成，请勿手改 ←←←
+          declare -A CPU_OF=(
+            [oneplus_13_b]=sm8750            [oneplus_13s_b]=sm8750
+            [oneplus_13t_b]=sm8750           [oneplus_ace5_pro_b]=sm8750
+            [oneplus_ace5_ultra_b]=mt6991    [oneplus_ace_6]=sm8735
+            [oneplus_ace5_b]=sm8650          [oneplus_ace5_race_b]=sm8650
+            [oneplus_pad_pro_b]=sm8650       [oneplus_12_b]=sm8650
+            [oneplus_13r_b]=sm8635           [oneplus_turbo_6]=sm8635
+            [oneplus_turbo_6v]=sm8635        [oneplus_ace_3v_b]=sm8635
+            [oneplus_12r_b]=sm8550           [oneplus_ace3_pro_b]=sm8550
+            [oneplus_ace3_b]=sm8550          [oneplus_pad_2_pro_b]=sm8550
+            [oneplus_pad_3_b]=sm8550         [oneplus_pad2_b]=sm8550
+            [oneplus_nord_6]=sm7675          [oneplus_nord_5_b]=sm7550
+            [oneplus_nord_4_b]=sm7635        [oneplus_11_b]=sm8450
+            [oneplus_ace2_pro_b]=sm8450      [oneplus_ace_pro_v]=sm8450
+            [oneplus_10_pro_b]=sm8450        [oneplus_10t_v]=sm8450
+            [oneplus_open_b]=sm8450          [oneplus_11r_b]=sm8475
+            [oneplus_ace2_b]=sm8475          [oneplus_nord_ce4_lite_5g]=sm6375
+            [oneplus_nord_ce4_b]=sm6375      [oneplus_nord_6]=sm7675
+          )
+          # 机型 → 唯一合法 KMI（一加 GKI 实机对应关系）
+          declare -A KMI_OF=(
+            [oneplus_13_b]=android15/6.6     [oneplus_13s_b]=android15/6.6
+            [oneplus_13t_b]=android15/6.6    [oneplus_ace5_pro_b]=android15/6.6
+            [oneplus_ace5_ultra_b]=android15/6.6  [oneplus_ace_6]=android15/6.6
+            [oneplus_ace5_b]=android14/6.1   [oneplus_ace5_race_b]=android14/6.1
+            [oneplus_pad_pro_b]=android14/6.1 [oneplus_12_b]=android14/6.1
+            [oneplus_13r_b]=android14/6.1    [oneplus_turbo_6]=android14/6.1
+            [oneplus_turbo_6v]=android14/6.1 [oneplus_ace_3v_b]=android14/6.1
+            [oneplus_12r_b]=android14/6.1    [oneplus_ace3_pro_b]=android14/6.1
+            [oneplus_ace3_b]=android14/6.1   [oneplus_pad_2_pro_b]=android14/6.1
+            [oneplus_pad_3_b]=android14/6.1  [oneplus_pad2_b]=android14/6.1
+            [oneplus_nord_6]=android14/6.1   [oneplus_nord_5_b]=android14/6.1
+            [oneplus_nord_4_b]=android14/6.1 [oneplus_11_b]=android14/6.1
+            [oneplus_ace2_pro_b]=android14/6.1 [oneplus_ace_pro_v]=android14/6.1
+            [oneplus_11r_b]=android14/6.1    [oneplus_ace2_b]=android14/6.1
+            [oneplus_10_pro_b]=android12/5.10 [oneplus_10t_v]=android12/5.10
+            [oneplus_open_b]=android12/5.10  [oneplus_ace2_pro_b_510]=x
+            [oneplus_nord_ce4_lite_5g]=android13/5.10 [oneplus_nord_ce4_b]=android13/5.10
+          )
+
+          want="${CPU_OF[$DEV]:-__MISSING__}"
+          if [ "$want" = "__MISSING__" ]; then
+            echo "::error::❌ $DEV 不在机型表 CPU_OF 里，请检查拼写或先跑 scripts/gen_cpu_map.sh 刷新"
+            exit 1
+          fi
+
+          OVER="${{ github.event.inputs.CPU_OVERRIDE }}"
+          if [ -n "$OVER" ]; then
+            echo "::warning::CPU_OVERRIDE 已强制为 $OVER（跳过 CPU 校验，风险自担）"
+            CPU="$OVER"
+          else
+            if [ "$want" != "$CPU_IN" ]; then
+              echo "::error::❌ 组合非法：$DEV 属于 $want，你却选了 $CPU_IN"
+              echo "           manifest 分支 oneplus/$CPU_IN 下没有 $DEV.xml，repo init 必定 fatal"
+              echo "           → 请把 CPU 改成 $want（或留空 CPU_OVERRIDE 让它自动推导）"
+              exit 1
+            fi
+            CPU="$want"
+          fi
+          echo "CPU=$CPU" >> $GITHUB_ENV
+          echo "DEV=$DEV" >> $GITHUB_ENV
+
+          # KMI 搭档：一加 GKI 只存在 4 组合法搭配
+          case "$AV/$KV" in
+            android12/5.10|android13/5.10|android13/5.15|android14/6.1|android15/6.6) ;;
+            *)
+              echo "::error::❌ KMI 组合 $AV + $KV 不存在于一加 GKI 产品线"
+              echo "           合法：android12+5.10 / android13+5.10|5.15 / android14+6.1 / android15+6.6"
+              exit 1 ;;
+          esac
+
+          WANTKMI="${KMI_OF[$DEV]:-}"
+          if [ -n "$WANTKMI" ] && [ "$WANTKMI" != "x" ] && [ "$WANTKMI" != "$AV/$KV" ]; then
+            echo "::error::❌ $DEV 实机对应 $WANTKMI，你选的是 $AV/$KV —— 选错=bootloop 或 WiFi/相机全废"
+            echo "           （若你确认 manifest 已更新，请同步改 workflow 里的 KMI_OF 表）"
+            exit 1
+          fi
+
+          # P0-3a: UNICODE_BYPASS 作者自己标注仅推荐 5.10
+          if [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ] && [ "$KV" != "5.10" ]; then
+            echo "::error::❌ UNICODE_BYPASS 仅建议 5.10 使用（$KV 会与 GKI 符号冲突）"
+            echo "           无痛替代方案：https://t.me/real5ec1cff/271"
+            exit 1
+          fi
+          # P2-x: 联发科必须关 proxy 优化（作者原文已警告）
+          if [ "${{ github.event.inputs.proxy }}" = "On" ] && [[ "$CPU" == mt* ]]; then
+            echo "::error::❌ $CPU 是联发科平台，proxy 优化会触发恶性问题，请把 proxy 设为 Off"
+            exit 1
+          fi
+          # P1-3a: Bazel 仅 sm8550+6.1(pineapple)
+          if [ "${{ github.event.inputs.BAZEL }}" = "On" ]; then
+            if [ "$KV" != "6.1" ] || [ "$CPU" != "sm8550" ]; then
+              echo "::error::❌ Bazel 仅支持 sm8550 + 6.1 (pineapple)，当前 $DEV/$CPU/$KV"
+              echo "           → BAZEL 改 Off 走 Clang，或换 sm8550 系机型 + 6.1"
+              exit 1
+            fi
+          fi
+          echo "✅ 组合校验通过：$DEV / $CPU / $AV-$KV / SUSFS=${{ github.event.inputs.SUSFS }}"
+
+      - name: "⚙️ Setup Cache Env | 设置缓存环境 (P2-1: key维度已扩)"
+        run: |
+          echo "🔧 正在设置机型/KMI 隔离缓存目录..."
+          # P2-1: 原 key 只按机型隔离，切 ANDROID_VERSION/KERNEL_VERSION/lz4kd 会串味
+          CC="ccache-${{ github.event.inputs.FEIL }}-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}"
+          [ "${{ github.event.inputs.lz4kd }}" = "On" ] && CC="${CC}-lz4kd" || CC="${CC}-std"
+          [ "${{ github.event.inputs.SUSFS }}" = "On" ] && CC="${CC}-SUSFS" || CC="${CC}-NoSUSFS"
+          echo "CCACHE_DIR=$HOME/.$CC" >> $GITHUB_ENV
+          echo "CCACHE_DIR_BASE=$CC" >> $GITHUB_ENV
+          mkdir -p "$HOME/.$CC"
+          echo "✅ 缓存目录: $HOME/.$CC"
+          # P2-1: workflow 自身变更 → 缓存自动失效（改了补丁还命中旧 .o 的灵异事件根源）
+          echo "CACHE_EPOCH=${{ hashFiles('.github/workflows/Build BakaSU.yml', 'script/**', 'security_patch/**') }}" >> $GITHUB_ENV
 
       - name: "🔐 Configure Git | 配置Git账户"
         run: |
@@ -196,31 +336,53 @@ jobs:
           git config --global user.email "2210077278@qq.com"
           echo "✅ Git配置完成"
 
-      - name: "📦 Cache & Install Dependencies | 缓存 & 安装构建依赖"
-        uses: awalsh128/cache-apt-pkgs-action@latest 
-        with: 
-          packages: python3 git curl ccache libelf-dev build-essential flex bison libssl-dev libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk dos2unix
-          execute_install_scripts: true
+      - name: "📦 Install Build Dependencies | 安装构建依赖"
+        run: |
+          echo "🔄 刷新 apt 索引（防 runner 镜像 lists 过期导致 404 静默失败）..."
+          for i in 1 2 3; do
+            sudo apt-get update -o Acquire::Retries=3 && break
+            echo "⚠️ apt-get update 第 $i 次失败，10s 后重试"; sleep 10
+          done
+          sudo apt-get install -y --no-install-recommends \
+            python3 git curl ccache libelf-dev build-essential \
+            flex bison libssl-dev libncurses-dev liblz4-tool \
+            zlib1g-dev libxml2-utils rsync unzip gawk dos2unix bc lld
+          echo "🧹 清理 apt 缓存，给构建盘腾空间"
+          sudo apt-get clean
+          df -h /
+
+      - name: "🩺 Sanity Check | 依赖自检（缺一个就立刻红，别拖到 20 分钟后）"
+        run: |
+          fail=0
+          for t in ccache clang repo python3 git make flex bison; do
+            if command -v "$t" >/dev/null 2>&1; then
+              printf "  ✅ %-10s %s\n" "$t" "$(command -v $t)"
+            else
+              printf "  ❌ %-10s MISSING\n" "$t"; fail=1
+            fi
+          done
+          ccache --version || true
+          [ "$fail" = 0 ] || { echo "::error::基础依赖缺失，检查上一步 apt 日志"; exit 1; }
 
       - name: "💾 Restore ccache (With SUSFS) | 恢复ccache缓存 (With SUSFS)"
         if: ${{ github.event.inputs.SUSFS == 'On' }}
-        uses: actions/cache@v5
+        uses: actions/cache@PINNED_SHA_PLACEHOLDER # v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.event.inputs.FEIL }}-BakaSU-SUSFS
+          key: ccache-v2-${{ runner.os }}-${{ env.CCACHE_DIR_BASE }}-${{ env.CACHE_EPOCH }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ github.event.inputs.FEIL }}-BakaSU-SUSFS
-            ccache-${{ runner.os }}-BakaSU-SUSFS
+            ccache-v2-${{ runner.os }}-${{ env.CCACHE_DIR_BASE }}-
+            ccache-v2-${{ runner.os }}-${{ github.event.inputs.FEIL }}-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}-
 
       - name: "💾 Restore ccache (Without SUSFS) | 恢复ccache缓存 (Without SUSFS)"
         if: ${{ github.event.inputs.SUSFS == 'Off' }}
-        uses: actions/cache@v5
+        uses: actions/cache@PINNED_SHA_PLACEHOLDER # v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.event.inputs.FEIL }}-BakaSU-NoSUSFS
+          key: ccache-v2-${{ runner.os }}-${{ env.CCACHE_DIR_BASE }}-${{ env.CACHE_EPOCH }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ github.event.inputs.FEIL }}-BakaSU-NoSUSFS
-            ccache-${{ runner.os }}-BakaSU-NoSUSFS
+            ccache-v2-${{ runner.os }}-${{ env.CCACHE_DIR_BASE }}-
+            ccache-v2-${{ runner.os }}-${{ github.event.inputs.FEIL }}-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}-
 
       - name: "⚙️ Initialize ccache | 初始化ccache"
         run: |
@@ -239,32 +401,52 @@ jobs:
           else
             echo "⚠️ 未找到ccache命令，跳过初始化"
           fi
-          # 显示缓存统计
-          ccache -s
+          # 显示缓存统计 —— P1-1: 你上轮漏改的那句，必须容错
+          ccache -s || echo "::warning::ccache 统计不可用（非致命），继续"
           echo "✅ ccache初始化流程完成"
 
       - name: "📥 Install Repo Tool | 安装Repo工具"
         run: |
-          echo "⬇️ 正在下载repo工具..."
-          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
-          chmod a+x ~/repo
-          sudo mv ~/repo /usr/local/bin/repo
-          echo "✅ repo工具安装完成"
+          echo "⬇️ 正在获取repo工具..."
+          if command -v repo >/dev/null 2>&1 && repo --version >/dev/null 2>&1; then
+            echo "ℹ️ runner 已自带 repo: $(command -v repo)"; repo --version | head -1
+          else
+            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/repo
+            # P3: 无校验的 curl|mv 等于把 root 交给上游，至少钉 sha256（首次跑失败时按提示填真实值）
+            REPO_EXPECT="${{ vars.REPO_SHA256 }}"
+            if [ -n "$REPO_EXPECT" ]; then
+              echo "$REPO_EXPECT  ~/repo" | sha256sum -c - || { echo "::error::repo sha256 不匹配，可能被投毒"; exit 1; }
+            else
+              echo "::warning::未设置 repo REPO_SHA256（Settings→Variables），跳过校验"
+            fi
+            chmod a+x ~/repo && sudo mv ~/repo /usr/local/bin/repo
+          fi
+          echo "✅ repo工具就绪"
 
       - name: "⬇️ Clone Kernel Source | 克隆内核源码"
         run: |
           mkdir kernel_workspace && cd kernel_workspace
 
           echo "🌐 正在初始化内核仓库..."
-          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
+          # P0-1: 用校验步推导出的 env.CPU，而非用户手选的 CPU（防 30 秒 fatal: manifest not found）
+          echo "🌐 manifest 分支: oneplus/${{ env.CPU }}   目标xml: ${{ env.DEV }}.xml"
+          repo init -u https://github.com/Xiaomichael/kernel_manifest.git \
+                    -b refs/heads/oneplus/${{ env.CPU }} \
+                    -m ${{ env.DEV }}.xml --depth=1 || {
+            echo "::error::❌ repo init 失败。请确认 kernel_manifest 的 oneplus/${{ env.CPU }} 分支下确有 ${{ env.DEV }}.xml"
+            echo "           自检：gh api repos/Xiaomichael/kernel_manifest/contents/?ref=oneplus/${{ env.CPU }} --jq '.[].name' | grep xml"
+            exit 1
+          }
 
           echo "🔄 同步代码库(使用$(nproc --all)线程)..."
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle --force-sync
  
           echo "✅ 内核源码克隆完成"
      
-          rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
-          rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
+          shopt -s nullglob
+          rm -f kernel_platform/common/android/abi_gki_protected_exports_*   || true
+          rm -f kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || true
+          echo "ℹ️ abi_gki_protected_exports 已清理(若无则跳过)"
 
           echo "🔧 正在配置内核版本信息..."
           # Remove -dirty in kernel version
@@ -281,7 +463,9 @@ jobs:
             sed -i '$s|echo "\$res"|echo "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"|' kernel_platform/external/dtc/scripts/setlocalversion
           else
             ESCAPED_SUFFIX=$(printf '%s\n' "-${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow" | sed 's:[\/&]:\\&:g')
-            sudo sed -i "s/-4k/$ESCAPED_SUFFIX/g" kernel_platform/common/arch/arm64/configs/gki_defconfig
+            # P3: 原用 sudo 会把 gki_defconfig owner 改成 root，后面 echo >> 可能权限错
+            chmod u+w kernel_platform/common/arch/arm64/configs/gki_defconfig
+            sed -i "s/-4k/$ESCAPED_SUFFIX/g" kernel_platform/common/arch/arm64/configs/gki_defconfig
             sed -i 's/${scm_version}//' kernel_platform/common/scripts/setlocalversion
             sed -i 's/${scm_version}//' kernel_platform/msm-kernel/scripts/setlocalversion
           fi
@@ -289,25 +473,48 @@ jobs:
           echo "✅ 内核配置完成"
 
       - name: "⚡ Setup Baseband-guard | 配置 Baseband-guard"
-        if: ${{ github.event.inputs.bbg == 'On' && github.event.inputs.KPM == 'Off' }}
+        # P0-2: 原写法 && inputs.KPM == 'Off'，但 inputs 里根本没有 KPM → 恒为 '' → BBG 永远静默跳过
+        if: ${{ github.event.inputs.bbg == 'On' }}
         run: |
           set -e
           cd kernel_workspace/kernel_platform/common
           echo "🛠️ 正在设置BBG..."
-          curl -sSL https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh -o setup.sh
-          bash setup.sh     
+          # P3: 先落盘再执行，别 curl|bash；-f 让 404 变非 0
+          curl -fsSL https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh -o bbg_setup.sh
+          BBG_EXPECT="${{ vars.BBG_SETUP_SHA256 }}"
+          if [ -n "$BBG_EXPECT" ]; then
+            echo "$BBG_EXPECT  bbg_setup.sh" | sha256sum -c - || { echo "::error::BBG setup.sh 校验失败"; exit 1; }
+          else
+            echo "::warning::未设 BBG_SETUP_SHA256，跳过校验（建议 pin 一次）"
+          fi
+          bash bbg_setup.sh
+          grep -q 'baseband_guard' security/*/Kconfig 2>/dev/null || echo "::warning::BBG setup 后未检出 Kconfig，请人工核对日志"
               
       - name: "⚡ Setup BakaSU | 配置 BakaSU"
         run: |
           cd kernel_workspace/kernel_platform
 
-          # 下载并执行设置脚本
-          echo "🛠️ 正在设置BakaSU..."
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
+          # 下载并执行设置脚本（P2-6: 支持 pin；P3: 不再 curl|bash）
+          BAKA_REF="${{ github.event.inputs.BAKASU_REF }}"
+          BAKA_REF="${BAKA_REF:-main}"
+          echo "🛠️ 正在设置BakaSU (ref=$BAKA_REF)..."
+          curl -fsSL "https://raw.githubusercontent.com/Baka-SU/BakaSU/${BAKA_REF}/kernel/setup.sh" -o bakasu_setup.sh
+          BAKA_EXPECT="${{ vars.BAKASU_SETUP_SHA256 }}"
+          if [ -n "$BAKA_EXPECT" ]; then
+            echo "$BAKA_EXPECT  bakasu_setup.sh" | sha256sum -c - || { echo "::error::BakaSU setup.sh 校验失败"; exit 1; }
+          fi
+          bash bakasu_setup.sh "$BAKA_REF"
+          echo "BAKASU_REF=${BAKA_REF}" >> $GITHUB_ENV
 
           cd KernelSU
-          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 30700)
+          KSU_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$BAKA_REF")
+          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 30700)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          echo "✅ BakaSU $(git rev-parse --short HEAD)  计数=$KSU_VERSION"
+          # P2-6: 记录 BakaSU 声明的 SUSFS 期望版本，稍后与 susfs4ksu 对拍
+          KSU_SV=$(grep -rhoE 'susfs_version[[:space:]]*"v?[0-9]+\.[0-9]+\.[0-9]+"' . 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          echo "KSU_SUSFS_WANT=${KSU_SV:-}" >> $GITHUB_ENV
+          [ -n "$KSU_SV" ] && echo "ℹ️ BakaSU 期望 SUSFS v$KSU_SV" || echo "ℹ️ BakaSU 未声明 susfs_version（跳过对拍）"
           
           if [ "${{ github.event.inputs.BAZEL }}" == "On" ]; then
             KSU_KBUILD="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/KernelSU/kernel/Kbuild"
@@ -319,16 +526,73 @@ jobs:
 
           echo "✅ BakaSU 配置完成"
           
-      - name: "🔧 Setup Patches | 配置补丁"
+      - name: "🔧 Setup Patches | 配置补丁 (P1-5: 严格应用+ .rej 兜底)"
         run: |
+          set -euo pipefail
           cd kernel_workspace
 
-          echo "⬇️ 克隆所需补丁..."
-          if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then          
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
+          # ═══ P1-5 核心：补丁失败必须停，绝不 || true ═══
+          apply_patch_strict() {          # $1=patch文件  $2=fuzz  $3=是否必需(1必需/0可选)
+            local f="$1" slack="${2:-3}" need="${3:-1}"
+            [ -f "$f" ] || { echo "::error::❌ 补丁文件不存在: $f"; exit 1; }
+            dos2unix -q "$f" || true      # 来自 gitlab 的补丁可能被塞 CRLF → hunk 全 fail
+            echo "➡️ 应用 $f (fuzz=$slack, required=$need)"
+            if patch -p1 -F "$slack" --dry-run < "$f" >/dev/null 2>&1; then
+              patch -p1 -F "$slack" --reject-file=/dev/null < "$f"
+              echo "   ✅ $f 干净应用"
+            else
+              if [ "$need" = "1" ]; then
+                echo "::error::❌ $f dry-run 失败，拒绝继续（半残内核比编不过更糟）"
+                echo "--- 补丁头 25 行 ---"; head -25 "$f"
+                echo "--- 目标文件是否存在 ---"; grep -E '^\+\+\+ ' "$f" | head -5
+                exit 1
+              else
+                echo "::warning::⚠️ $f 未应用（可选补丁，已跳过，工作树未被改动）"
+              fi
+            fi
+          }
+          fail_on_rejects() {
+            local r; r=$(find . -name '*.rej' -print 2>/dev/null | head -20)
+            if [ -n "$r" ]; then
+              echo "::error::❌ 检测到 .rej 残留，补丁树已污染，中止构建："; echo "$r"
+              find . -name '*.rej' -exec sh -c 'echo "■ $1"; head -15 "$1"' _ {} \;
+              exit 1
+            fi
+          }
+          trap 'fail_on_rejects' EXIT
+
+          echo "⬇️ 克隆所需补丁（P2-6: 支持 pin）..."
+          SUSFS_REF="${{ github.event.inputs.SUSFS_COMMIT }}"
+          if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
+            if [ -n "$SUSFS_REF" ]; then
+              echo "📌 pin susfs4ksu @ $SUSFS_REF"
+              git clone --quiet https://gitlab.com/simonpunk/susfs4ksu.git || exit 1
+              ( cd susfs4ksu && git checkout "$SUSFS_REF" ) || { echo "::error::susfs4ksu checkout $SUSFS_REF 失败"; exit 1; }
+            else
+              echo "::warning::SUSFS_COMMIT 留空 → 使用浮动分支 HEAD（上游一推就可能 hunk FAILED）"
+              git clone --quiet --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git \
+                       -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} || exit 1
+            fi
+            echo "SUSFS4KSU_SHA=$(cd susfs4ksu && git rev-parse HEAD)" >> $GITHUB_ENV
+            # ── P2-6 版本对拍：BakaSU 与 susfs4ksu 不同代 = 编出 SUSFS 半残内核，宁可 fail ──
+            SUS_SV=$(grep -hoE 'SUSFS_VERSION[[:space:]]*"v?[0-9]+\.[0-9]+\.[0-9]+"' susfs4ksu/fs/susfs.c 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+            if [ -n "${KSU_SUSFS_WANT:-}" ] && [ -n "$SUS_SV" ]; then
+              echo "🔎 版本对拍: BakaSU 需要 v${KSU_SUSFS_WANT} / susfs4ksu 提供 v${SUS_SV}"
+              if [ "$KSU_SUSFS_WANT" != "$SUS_SV" ]; then
+                echo "::error::❌ BakaSU(v${KSU_SUSFS_WANT}) 与 susfs4ksu(v${SUS_SV}) 不同代！"
+                echo "           配对不符会编出『能开机但 SUSFS 隐藏全失效』的内核，已中止。"
+                echo "           → 把 SUSFS_COMMIT 指向与 BakaSU 同代的 commit（susfs4ksu 提交历史里找同日或更晚的那次）"
+                exit 1
+              fi
+              echo "✅ 版本对拍通过 v${SUS_SV}"
+            else
+              echo "::warning::未能提取 SUSFS 版本号（上游改了宏名？），跳过对拍，请人工核对"
+            fi
           fi
-          git clone https://github.com/Xiaomichael/kernel_patches.git
-          git clone https://github.com/ShirkNeko/SukiSU_patch.git
+          git clone --quiet --depth=1 https://github.com/Xiaomichael/kernel_patches.git || exit 1
+          git clone --quiet --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git || exit 1
+          echo "KERNEL_PATCHES_SHA=$(cd kernel_patches && git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "SUKISU_PATCH_SHA=$(cd SukiSU_patch && git rev-parse --short HEAD)" >> $GITHUB_ENV
           
           cd kernel_platform
           echo "📝 复制补丁文件..."
@@ -369,26 +633,37 @@ jobs:
 
           if [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ]; then
             echo "📦 正在应用Unicode零宽绕过修复补丁..."
-            patch -p1 < unicode_bypass_fix.patch
+            apply_patch_strict unicode_bypass_fix.patch 3 1
           fi
 
+          # P1-5: 001-lz4 是可选优化 → need=0（失败会回滚，不留半改状态）
           if [ "${{ github.event.inputs.lz4kd }}" = "Off" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
             echo "📦 应用lz4补丁..."
-            git apply -p1 < 001-lz4.patch || true
-            # patch -p1 < 002-zstd.patch || true
+            if ! git apply -p1 --check 001-lz4.patch 2>/dev/null; then
+              echo "::warning::001-lz4.patch 不适用（可选，回退内核自带 lz4）"
+            else
+              git apply -p1 < 001-lz4.patch && echo "✅ 001-lz4 应用完成"
+            fi
+            # 002-zstd 目前有意禁用（见上游注释）
           fi
 
           if [ "${{ github.event.inputs.lz4kd }}" = "Off" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.6" ]; then
             echo "📦 应用lz4补丁..."
-            git apply -p1 < 001-lz4.patch || true
+            if ! git apply -p1 --check 001-lz4.patch 2>/dev/null; then
+              echo "::warning::001-lz4.patch 不适用（可选，回退内核自带 lz4）"
+            else
+              git apply -p1 < 001-lz4.patch && echo "✅ 001-lz4 应用完成"
+            fi
           fi
-          
+
           if [ "${{ github.event.inputs.lz4kd }}" == "On" ]; then
-            echo "📦 应用lz4kd补丁..."
-            cp ../../SukiSU_patch/other/zram/zram_patch/${{ github.event.inputs.KERNEL_VERSION }}/lz4kd.patch ./
-            patch -p1 -F 3 < lz4kd.patch || true
-            cp ../../SukiSU_patch/other/zram/zram_patch/${{ github.event.inputs.KERNEL_VERSION }}/lz4k_oplus.patch ./
-            patch -p1 -F 3 < lz4k_oplus.patch || true
+            echo "📦 应用lz4kd补丁（必需：失败则后面 CONFIG_CRYPTO_LZ4KD=y 必然编译错）..."
+            # P3: 原用 ../../ 相对路径，cd 层级一变就跑到 $GITHUB_WORKSPACE 外层，改绝对路径
+            SP="${GITHUB_WORKSPACE}/kernel_workspace/SukiSU_patch/other/zram/zram_patch/${{ github.event.inputs.KERNEL_VERSION }}"
+            [ -f "$SP/lz4kd.patch" ]     || { echo "::error::缺 $SP/lz4kd.patch（该内核版本可能不支持 lz4kd）"; exit 1; }
+            [ -f "$SP/lz4k_oplus.patch" ] || { echo "::error::缺 $SP/lz4k_oplus.patch"; exit 1; }
+            apply_patch_strict "$SP/lz4kd.patch" 3 1
+            apply_patch_strict "$SP/lz4k_oplus.patch" 3 1
           fi
 
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
@@ -449,7 +724,8 @@ jobs:
               fi
             fi
             
-            patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
+            # P1-5: 原来这里是 `|| true` —— 补丁半失败也继续编 25 分钟，出 SUSFS 残包。改为硬失败。
+            apply_patch_strict "50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch" 3 1
             
             # Revert Fake kernel patch
             if [ "$fake_patched_expand" = 1 ]; then
@@ -503,28 +779,41 @@ jobs:
         run: |
           cd kernel_workspace/kernel_platform/common
 
+          set -euo pipefail
+          DEV="${{ env.DEV }}"
+          CPU="${{ env.CPU }}"
+
+          # P1-4: 原逻辑 `cp A B; if [ -f B ]` → 恒真，else 分支是死代码，兜底补丁永远打不上
           echo "⬇️ 正在拉取风驰补丁"
-          if [ "${{ github.event.inputs.FEIL }}" == "oneplus_ace5_ultra" ] || [ "${{ github.event.inputs.FEIL }}" = "oneplus_ace5_ultra_b" ]; then
-              echo "⚠️ Ace5 Ultra 需要使用 mt6991 分支的补丁"
-              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
-          else
-              echo "⚙️ 使用 sm8750 分支的补丁"
-              git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750"
+          case "${{ github.event.inputs.SCHED_REF }}" in
+            auto)  SCHED_BR="$CPU" ;;
+            *)     SCHED_BR="${{ github.event.inputs.SCHED_REF }}" ;;
+          esac
+          echo "⚙️ 使用 SCHED_PATCH 分支: $SCHED_BR"
+          if ! git clone --quiet --depth=1 https://github.com/Numbersf/SCHED_PATCH.git -b "$SCHED_BR"; then
+            echo "::error::❌ SCHED_PATCH 无分支 $SCHED_BR。可用分支见仓库网页。"
+            echo "           → 把 SCHED_REF 改成存在的分支，或设为 Off 那步跳过"
+            exit 1
           fi
+          echo "SCHED_PATCH_SHA=$(cd SCHED_PATCH && git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-          cp ./SCHED_PATCH/fengchi_${{ github.event.inputs.FEIL }}.patch ./
-
-          if [[ -f "fengchi_${{ github.event.inputs.FEIL }}.patch" ]]; then
-            echo "⚙️ 开始应用风驰补丁"
-            dos2unix "fengchi_${{ github.event.inputs.FEIL }}.patch"
-            patch -p1 -F 3 < "fengchi_${{ github.event.inputs.FEIL }}.patch"
-            echo "✅ 完美风驰补丁应用完成"
+          PF="SCHED_PATCH/fengchi_${DEV}.patch"
+          if [ -f "$PF" ]; then                      # ← 先判存在，再 cp（顺序不能反）
+            cp "$PF" ./ && dos2unix -q "fengchi_${DEV}.patch"
+            echo "⚙️ 开始应用风驰补丁 fengchi_${DEV}.patch"
+            patch -p1 -F 3 < "fengchi_${DEV}.patch"  # 无 || true：打不上就红，别假装成功
+            echo "✅ 完美风驰补丁应用完成 ($SCHED_BR)"
           else
-            sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
-            wget https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
-            echo "⚙️ 正在打OGKI转换GKI补丁"
-            patch -p1 -F 3 < hmbird_patch.patch
-            echo "✅ OGKI转换GKI_patch完成"
+            echo "::warning::⚠️ SCHED_PATCH@$SCHED_BR 没有 $DEV 专用补丁"
+            echo "           该分支可用机型补丁: $(ls SCHED_PATCH/ 2>/dev/null | grep '^fengchi_' | tr '\n' ' ')"
+            echo "           → 需要的话给 Numbersf/SCHED_PATCH 提 PR 补一个"
+            echo "⚙️ 降级为 hmbird OGKI→GKI 转换补丁"
+            # P1-4: obj-y 插到第 1 行会打乱 drivers/Makefile 子目录顺序，改插到末尾
+            printf '\nobj-y += hmbird_patch.o\n' >> drivers/Makefile
+            curl -fsSL -o hmbird_patch.patch \
+              https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
+            patch -p1 -F 3 < hmbird_patch.patch      # -f 已保证 404→非0；set -e 会拦住
+            echo "✅ OGKI→GKI hmbird 兜底补丁应用完成"
           fi
           
       - name: "⚙️ Configure Kernel Options | 配置内核选项"
@@ -534,10 +823,21 @@ jobs:
           echo "⚙️ 正在配置内核编译选项..."
           
           echo "📦 启用 KSU 支持..."
-          curl -L -o BakaSU_setup.bin https://github.com/Xiaomichael/OnePlus-Actions/raw/Build/script/bakasu_setup.bin
+          # ⚠️ P3 全 YAML 信任风险最高的一行：仓库里的二进制 blob，无来源/无签名/无 hash
+          curl -fsSL -o BakaSU_setup.bin https://github.com/Xiaomichael/OnePlus-Actions/raw/Build/script/bakasu_setup.bin
+          BIN_EXPECT="${{ vars.BAKASU_BIN_SHA256 }}"
+          if [ -n "$BIN_EXPECT" ]; then
+            echo "$BIN_EXPECT  BakaSU_setup.bin" | sha256sum -c - \
+              || { echo "::error::❌ bakasu_setup.bin 校验不匹配！上游可能已被改，拒绝执行"; exit 1; }
+          else
+            echo "::error::❌ 未设置 Settings→Variables→BAKASU_BIN_SHA256，拒绝执行来历不明的二进制"
+            echo "           首次使用请：本地下载该 bin → sha256sum → 填进 repo Variables 后再跑"
+            echo "           （长期建议：让上游把 bin 换成可 review 的 shell 脚本）"
+            exit 1
+          fi
           chmod +x BakaSU_setup.bin
           ./BakaSU_setup.bin
-          rm -rf ./BakaSU_setup.bin
+          rm -f ./BakaSU_setup.bin
           
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
             echo "📦 启用 SUSFS 功能..."
@@ -560,7 +860,7 @@ jobs:
           echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-          if [ "${{ github.event.inputs.bbg }}" == "On" ] && [ "${{ github.event.inputs.KPM }}" == "Off" ]; then
+          if [ "${{ github.event.inputs.bbg }}" == "On" ]; then   # P0-2: 去掉幽灵变量 KPM
             echo "⚡ 配置 BBG 中..."
             echo 'CONFIG_BBG=y' >> ./common/arch/arm64/configs/gki_defconfig
             echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./common/arch/arm64/configs/gki_defconfig
@@ -569,7 +869,7 @@ jobs:
           if [ "${{ github.event.inputs.bbr }}" == "On" ]; then
             echo "🌐 启用 BBR 网络算法..."
             echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/ggi_defconfig 2>/dev/null || echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
@@ -599,7 +899,7 @@ jobs:
             echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_HASH_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/ggi_defconfig 2>/dev/null || echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_HASH_IPPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -643,33 +943,44 @@ jobs:
             export KBUILD_BUILD_VERSION=1
             export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH"
             export PATH="/usr/lib/ccache:$PATH"
-            sudo apt install libelf-dev
+            # P1-2: 原 `sudo apt install libelf-dev`（依赖步已装+多一个网络失败点+可能要密码），已删
             cd kernel_workspace/kernel_platform/common
             make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-O2 gki_defconfig all
 
           elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.6" ]; then
             export PATH="/usr/lib/ccache:$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH" 
             export PATH="/usr/lib/ccache:$PATH"
-            sudo apt install libelf-dev
+            # P1-2: 原 `sudo apt install libelf-dev`（依赖步已装+多一个网络失败点+可能要密码），已删
             cd kernel_workspace/kernel_platform/common
             make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-O2  gki_defconfig all
             
           elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.15" ]; then
             export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
             export PATH="/usr/lib/ccache:$PATH"
-            sudo apt install libelf-dev
+            # P1-2: 原 `sudo apt install libelf-dev`（依赖步已装+多一个网络失败点+可能要密码），已删
             cd kernel_workspace/kernel_platform/common
             make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all
             
           elif [ "${{ github.event.inputs.KERNEL_VERSION }}" == "5.10" ]; then
             export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r416183b/bin:$PATH"
             export PATH="/usr/lib/ccache:$PATH"
-            sudo apt install libelf-dev
+            # P1-2: 原 `sudo apt install libelf-dev`（依赖步已装+多一个网络失败点+可能要密码），已删
             cd kernel_workspace/kernel_platform/common
             make -j$(nproc --all) LLVM_IAS=1 LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all
           fi
           
-          ccache -s
+          ccache -s || echo "::warning::ccache 统计不可用（非致命），继续"
+          # P2-5: 落一份构建指纹，排障时不用猜"当时到底开了啥"
+          {
+            echo "### Build $(date -u '+%F %T UTC')  sha=${GITHUB_SHA}  run=#${GITHUB_RUN_ID}"
+            echo "### inputs : DEV=${{ github.event.inputs.FEIL }} CPU=${{ env.CPU }} ${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}"
+            echo "###         SUSFS=${{ github.event.inputs.SUSFS }} lz4kd=${{ github.event.inputs.lz4kd }} bbg=${{ github.event.inputs.bbg }} bbr=${{ github.event.inputs.bbr }} proxy=${{ github.event.inputs.proxy }}"
+            echo "###         UNICODE=${{ github.event.inputs.UNICODE_BYPASS }} CVE=${{ github.event.inputs.CVE_2026_43499 }} BAZEL=${{ github.event.inputs.BAZEL }}"
+            echo "### BakaSU : ${{ github.event.inputs.BAKASU_REF }} @ $(cd kernel_workspace/kernel_platform/KernelSU 2>/dev/null && git rev-parse --short HEAD || echo n/a)  ver=${KSUVER:-n/a}"
+            echo "### SUSFS4KSU: ${{ github.event.inputs.SUSFS_COMMIT }} @ $(cd kernel_workspace/susfs4ksu 2>/dev/null && git rev-parse --short HEAD || echo n/a)"
+            echo "### clang  : $(${GITHUB_WORKSPACE}/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/*/bin/clang --version 2>/dev/null | head -1)"
+            echo "### uname  suffix: -${{ github.event.inputs.ANDROID_VERSION }}-oki-xiaoxiaow"
+          } | tee "${GITHUB_WORKSPACE}/BUILD_INFO.txt"
           echo "✅ 内核编译完成"
 
       - name: "🔨 Build Kernel | 编译内核 (Bazel)"
@@ -683,10 +994,14 @@ jobs:
           if [ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.1" ]; then
             ./kernel_platform/build_with_bazel.py -t pineapple gki
           else
-            echo "⚠️ Bazel 构建仅支持6.1版本，当前版本为${{ github.event.inputs.KERNEL_VERSION }}，请使用 Clang 构建。"
+            # P1-3: 原来这里只 echo 警告然后打 ✅ → 没编任何东西却"成功"，打包步才炸
+            echo "::error::❌ Bazel 构建仅支持 sm8550 + 6.1 (pineapple)，当前 ${{ env.DEV }}/${{ env.CPU }}/${{ github.event.inputs.KERNEL_VERSION }}"
+            echo "           → BAZEL 改 Off 走 Clang；或换 sm8550 系机型 + KERNEL_VERSION=6.1"
+            exit 1
           fi
 
-          echo "✅ 内核编译完成"
+          ccache -s || true
+          echo "✅ 内核编译完成 (Bazel)"
 
       - name: "📦 Package Kernel | 打包内核"
         run: |
@@ -715,6 +1030,15 @@ jobs:
             echo "✅ Image file finally located at: $image_path"
             cp "$image_path" ./AnyKernel3/Image
             cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
+            # P2-5: 构建指纹进包，刷完出问题不用猜当时开了啥
+            [ -f "${GITHUB_WORKSPACE}/BUILD_INFO.txt" ] && cp "${GITHUB_WORKSPACE}/BUILD_INFO.txt" ./AnyKernel3/BUILD_INFO.txt
+            echo "📄 Image 大小: $(du -h "$image_path" | cut -f1)"
+          fi
+          # 校验 Image 不是 0 字节 / 不是残缺（ccache 命中残留的典型症状）
+          if [ -s ./AnyKernel3/Image ]; then
+            echo "✅ Image 非空校验通过 ($(stat -c%s ./AnyKernel3/Image) bytes)"
+          else
+            echo "::error::❌ AnyKernel3/Image 为空或缺失，拒绝打包出假包"; exit 1
           fi
 
       - name: "🧠 Set Artifact Name | 设置产物名称"
@@ -730,27 +1054,47 @@ jobs:
             BASE_NAME="${{ github.event.inputs.FEIL }}_BakaSU_${{ env.KSUVER }}"
           fi
           
-          if [ "${{ github.event.inputs.SUSFS }}" = "On" ]; then
-            FINAL_NAME="${BASE_NAME}_SUSFS"
-          else
-            FINAL_NAME="${BASE_NAME}"
-          fi
-          
+          # P2-5: 原命名只有 lz4kd/SUSFS 两维，一周后翻 Artifacts 分不清哪个开了 BBG/CVE
+          SUFFIX=""
+          [ "${{ github.event.inputs.SUSFS }}" = "On" ]        && SUFFIX="${SUFFIX}_SUSFS"
+          [ "${{ github.event.inputs.bbg }}" = "On" ]          && SUFFIX="${SUFFIX}_BBG"
+          [ "${{ github.event.inputs.bbr }}" = "On" ]           && SUFFIX="${SUFFIX}_BBR"
+          [ "${{ github.event.inputs.proxy }}" = "On" ]         && SUFFIX="${SUFFIX}_PROXY"
+          [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ] && SUFFIX="${SUFFIX}_UNICODE"
+          [ "${{ github.event.inputs.CVE_2026_43499 }}" = "On" ] && SUFFIX="${SUFFIX}_CVE2634"
+          [ "${{ github.event.inputs.BAZEL }}" = "On" ]         && SUFFIX="${SUFFIX}_BAZEL"
+          FINAL_NAME="${{ github.event.inputs.FEIL }}_BakaSU_${{ env.KSUVER }}_${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}${SUFFIX}"
+
           echo "ARTIFACT_NAME=${FINAL_NAME}" >> $GITHUB_OUTPUT
+          echo "📦 产物名: ${FINAL_NAME}"
 
       - name: "📤 Upload AnyKernel3 | 上传 AnyKernel3"
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@PINNED_SHA_PLACEHOLDER # v7
         with:
           name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}
-          path: ./AnyKernel3/*
+          path: |
+            ./AnyKernel3/*
+            ./BUILD_INFO.txt
+          if-no-files-found: error
+          retention-days: 30
          
-      - name: "📝 Find zram.ko & crypto_zstdn.ko | 查找 zram.ko & crypto_zstdn.ko"
+      # P2-4: find 找不到也 exit 0 → 上个步"绿"，却把失败推给 upload 步（那时你已等完全程）
+      # 且 GKI 默认 CONFIG_ZRAM=y 内建，zram.ko 本来就不生成，这两步对多数机型注定红
+      - name: "📝 Locate Modules | 定位 zram.ko / crypto_zstdn.ko"
+        id: mods
         run: |
-          find -name zram.ko
-          find -name crypto_zstdn.ko
-          
-      - name: "📤 Upload zram.ko | 上传 zram.ko"
-        uses: actions/upload-artifact@v7
+          Z=$(find kernel_workspace -name zram.ko -print -quit 2>/dev/null || true)
+          ZS=$(find kernel_workspace -name 'crypto_zstdn.ko' -print -quit 2>/dev/null || true)
+          if [ -n "$Z" ]; then echo "zram=$Z" >> $GITHUB_OUTPUT; echo "✅ zram.ko: $Z";
+          else echo "::warning::zram 为内建(y)，无 zram.ko 属正常，跳过上传"; fi
+          if [ -n "$ZS" ]; then echo "zstdn=$ZS" >> $GITHUB_OUTPUT; echo "✅ crypto_zstdn.ko: $ZS";
+          else echo "::warning::未生成 crypto_zstdn.ko（lz4kd Off 时正常），跳过上传"; fi
+
+      - name: "📤 Upload zram.ko | 上传 zram.ko (可选)"
+        if: ${{ steps.mods.outputs.zram != '' }}
+        uses: actions/upload-artifact@PINNED_SHA_PLACEHOLDER # v7
         with:
           name: ${{ github.event.inputs.FEIL }}_zram.ko
-          path: ./kernel_workspace/kernel_platform/common/out/drivers/block/zram/zram.ko
+          path: ${{ steps.mods.outputs.zram }}
+          if-no-files-found: warn
+          retention-days: 14   # P2-4: 原无 retention，6机型×3变体×90天两周就撞免费额度

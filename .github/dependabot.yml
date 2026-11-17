@@ -1,0 +1,26 @@
+# 放到 .github/dependabot.yml
+# 作用：钉死 SHA 之后，Dependabot 仍能识别尾部 "# vX.Y.Z" 注释并定期提更新 PR。
+# 没有这份配置，"钉 SHA" = 永久冻结在今天的版本，包括安全漏洞修复也收不到。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Asia/Shanghai"
+    # 5 个 workflow 的 action 更新合成一个 PR，别一周刷 6 条通知
+    groups:
+      actions-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+    labels: ["ci", "dependencies"]
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+  # 上游脚本/补丁的浮动 ref（BakaSU / susfs4ksu / SCHED_PATCH）不在 Dependabot 覆盖范围，
+  # 靠这份 weekly 提醒 + BakaSU 与 susfs4ksu 的版本对拍（YAML 里已加）来兜底：
+  # 版本不匹配会直接 exit 1，宁可红也不要编出 SUSFS 半残的内核。
